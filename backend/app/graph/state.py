@@ -35,9 +35,10 @@ class WorkflowState:
     
     # ========== ML PREDICTION ==========
     # From ML Service
-    ml_risk_level: Optional[RiskLevel] = None
+    ml_risk_level: Optional[str] = None
     ml_risk_score: float = 0.0
-    ml_confidence: float = 0.0
+    disagreement_flag: str = "Low"
+    ml_model_scores: Dict[str, float] = field(default_factory=dict)
     score_breakdown: Dict[str, Any] = field(default_factory=dict)
     
     # ========== RISK ANALYSIS AGENT OUTPUT ==========
@@ -71,11 +72,8 @@ class WorkflowState:
     # From Lending Decision Agent (LLM)
     final_decision: Dict[str, Any] = field(default_factory=dict)
     # Expected keys:
-    # - recommendation: RecommendationType
-    # - primary_reason: str
-    # - secondary_reasons: List[str]
-    # - suggested_action: str
-    # - manual_review_needed: bool
+    # - recommendation: str
+    # - reasoning: str
     
     # ========== TRACKING ==========
     # For debugging and monitoring
@@ -97,9 +95,10 @@ class WorkflowState:
             "foir": self.foir,
             "dti": self.dti,
             "proposed_emi": self.proposed_emi,
-            "ml_risk_level": self.ml_risk_level.value if self.ml_risk_level else None,
+            "ml_risk_level": self.ml_risk_level,
             "ml_risk_score": self.ml_risk_score,
-            "ml_confidence": self.ml_confidence,
+            "disagreement_flag": self.disagreement_flag,
+            "ml_model_scores": self.ml_model_scores,
             "score_breakdown": self.score_breakdown,
             "risk_analysis": self.risk_analysis,
             "policy_matches": self.policy_matches,

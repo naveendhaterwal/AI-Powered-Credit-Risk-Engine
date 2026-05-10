@@ -18,8 +18,9 @@ from app.schemas.borrower import BorrowerInput, BorrowerProfile
 from app.schemas.response import RiskLevel
 from app.core.config import settings
 from app.services.ml_service import ml_service
-from app.services.groq_service import groq_service, risk_agent, scoring_agent, decision_agent
+from app.services.groq_service import groq_service, risk_agent, decision_agent
 from app.services.rag_service import rag_service
+from app.services.report_service import report_service
 
 logger = logging.getLogger(__name__)
 
@@ -253,17 +254,21 @@ def node_ml_prediction(state: WorkflowState) -> WorkflowState:
         )
         
         # Get ML prediction
-        risk_level_str, risk_score, confidence, score_breakdown = ml_service.predict_risk(borrower_profile)
+        prediction_result = ml_service.predict_all_models(borrower_profile)
         
-        # Convert to enum
-        state.ml_risk_level = RiskLevel(risk_level_str)
-        state.ml_risk_score = round(risk_score, 2)
-        state.ml_confidence = round(confidence, 3)
-        state.score_breakdown = score_breakdown
+        # Store in state
+        state.ml_risk_level = prediction_result.get("risk_level")
+        state.ml_risk_score = prediction_result.get("ensemble_score")
+        state.disagreement_flag = prediction_result.get("disagreement_flag")
+        state.ml_model_scores = {
+            "logistic": prediction_result.get("logistic"),
+            "random_forest": prediction_result.get("random_forest"),
+            "gradient_boost": prediction_result.get("gradient_boost")
+        }
         
-        logger.info(f"   Risk Level: {state.ml_risk_level.value}")
+        logger.info(f"   Risk Level: {state.ml_risk_level}")
         logger.info(f"   Risk Score: {state.ml_risk_score}")
-        logger.info(f"   Confidence: {state.ml_confidence}")
+        logger.info(f"   Disagreement: {state.disagreement_flag}")
         
         state.step_completed = "ml_prediction"
         logger.info("✓ ML prediction complete")
@@ -274,9 +279,9 @@ def node_ml_prediction(state: WorkflowState) -> WorkflowState:
             node="ML Prediction",
             status="completed",
             started_at=started_at,
-            model=settings.ML_MODEL_PATH,
-            source=str(score_breakdown.get("method", "unknown")),
-            note="Risk score computed by ML pipeline.",
+            model="ensemble",
+            source="ml_service",
+            note="Risk score computed by ML ensemble.",
             input_data={
                 "credit_score": borrower.credit_score,
                 "employment_type": borrower.employment_type,
@@ -285,12 +290,7 @@ def node_ml_prediction(state: WorkflowState) -> WorkflowState:
                 "loan_amount_requested": state.loan_amount_requested,
                 "monthly_income": state.monthly_income,
             },
-            output_data={
-                "risk_level": state.ml_risk_level.value,
-                "risk_score": state.ml_risk_score,
-                "confidence": state.ml_confidence,
-                "score_breakdown": state.score_breakdown,
-            },
+            output_data=prediction_result,
         )
         
         return state
@@ -346,7 +346,7 @@ def node_risk_analysis(state: WorkflowState) -> WorkflowState:
         analysis, interaction = risk_agent.analyze(
             borrower_data=borrower_data,
             risk_score=state.ml_risk_score,
-            risk_level=state.ml_risk_level.value if state.ml_risk_level else "Unknown"
+            risk_level=state.ml_risk_level if state.ml_risk_level else "Unknown"
         )
         
         state.risk_analysis = analysis
@@ -519,7 +519,8 @@ def node_ai_scoring(state: WorkflowState) -> WorkflowState:
             ml_level=state.ml_risk_level.value if state.ml_risk_level else "Unknown",
             risk_analysis=state.risk_analysis,
             policy_matches=state.policy_matches,
-            borrower_data=borrower_data
+            borrower_data=borrower_data,
+            model_scores=state.ml_model_scores
         )
         
         state.final_ai_score = round(float(result.get("final_score", state.ml_risk_score)), 2)
@@ -610,11 +611,9 @@ def node_lending_decision(state: WorkflowState) -> WorkflowState:
         
         # Call decision agent
         decision, interaction = decision_agent.decide(
-            risk_analysis={
-                **state.risk_analysis,
-                "ai_refined_score": state.final_ai_score,
-                "ai_reasoning": state.ai_score_reasoning
-            },
+            model_scores=state.ml_model_scores,
+            ensemble_score=state.ml_risk_score,
+            disagreement_flag=state.disagreement_flag,
             policy_matches=state.policy_matches,
             borrower_data=borrower_data
         )
@@ -623,7 +622,7 @@ def node_lending_decision(state: WorkflowState) -> WorkflowState:
         state.agent_interactions.append(interaction)
         
         logger.info(f"   Recommendation: {decision.get('recommendation')}")
-        logger.info(f"   Reason: {decision.get('primary_reason')}")
+        logger.info(f"   Reasoning: {decision.get('reasoning')}")
         
         state.step_completed = "lending_decision"
         logger.info("✓ Lending decision complete")
@@ -648,10 +647,7 @@ def node_lending_decision(state: WorkflowState) -> WorkflowState:
             },
             output_data={
                 "recommendation": decision.get("recommendation"),
-                "primary_reason": decision.get("primary_reason"),
-                "secondary_reasons": decision.get("secondary_reasons", []),
-                "suggested_action": decision.get("suggested_action"),
-                "manual_review_needed": decision.get("manual_review_needed"),
+                "reasoning": decision.get("reasoning"),
                 "warnings": decision.get("warnings", []),
             },
         )
@@ -678,6 +674,24 @@ def node_lending_decision(state: WorkflowState) -> WorkflowState:
 
 
 # ============================================================================
+# NODE: REPORT AGENT
+# ============================================================================
+
+def node_report_agent(state: WorkflowState) -> WorkflowState:
+    """
+    Save the final report snapshot.
+    """
+    logger.info("📝 Node: Report Agent")
+    
+    # Save the report using the report service
+    report_data = report_service.build_report(state)
+    report_service.save_report(report_data)
+    
+    state.step_completed = "report_agent"
+    return state
+
+
+# ============================================================================
 # BUILD THE WORKFLOW GRAPH
 # ============================================================================
 
@@ -694,8 +708,8 @@ def build_workflow():
     workflow.add_node("ml_prediction", node_ml_prediction)
     workflow.add_node("risk_analysis", node_risk_analysis)
     workflow.add_node("policy_retrieval", node_policy_retrieval)
-    workflow.add_node("ai_scoring", node_ai_scoring)
-    workflow.add_node("lending_decision", node_lending_decision)
+    workflow.add_node("decision_agent", node_lending_decision)
+    workflow.add_node("report_agent", node_report_agent)
     
     # Set entry point
     workflow.set_entry_point("input_processing")
@@ -704,9 +718,9 @@ def build_workflow():
     workflow.add_edge("input_processing", "ml_prediction")
     workflow.add_edge("ml_prediction", "risk_analysis")
     workflow.add_edge("risk_analysis", "policy_retrieval")
-    workflow.add_edge("policy_retrieval", "ai_scoring")
-    workflow.add_edge("ai_scoring", "lending_decision")
-    workflow.add_edge("lending_decision", END)
+    workflow.add_edge("policy_retrieval", "decision_agent")
+    workflow.add_edge("decision_agent", "report_agent")
+    workflow.add_edge("report_agent", END)
     
     # Compile
     graph = workflow.compile()

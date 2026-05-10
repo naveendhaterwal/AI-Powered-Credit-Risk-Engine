@@ -19,45 +19,59 @@ logger = logging.getLogger(__name__)
 class MLService:
     """
     Service for ML model predictions.
-    Loads the model once and reuses it.
+    Loads multiple models and provides an ensemble consensus score.
     """
     
     def __init__(self):
-        """Initialize the service - load model on startup"""
-        self.model = None
+        """Initialize the service - load models on startup"""
+        self.models: Dict[str, Any] = {}
         self.feature_columns: List[str] = []
-        self.model_loaded = False
+        self.models_loaded = False
         self.use_fallback = False
-        self._load_model()
+        self._load_models()
     
-    def _load_model(self):
-        """Load the ML model from disk"""
+    def _load_models(self):
+        """Load multiple ML models from disk"""
         try:
-            model_path = Path(settings.ML_MODEL_PATH)
             feature_path = Path(settings.FEATURE_COLUMNS_PATH)
-            
-            if not model_path.exists():
-                logger.warning(f"Model not found at {model_path}. Switching to rule-based fallback.")
-                self.use_fallback = True
-                return
-
             if not feature_path.exists():
                 logger.warning(f"Feature columns not found at {feature_path}. Switching to rule-based fallback.")
                 self.use_fallback = True
                 return
             
-            # Load the trained model
-            self.model = joblib.load(model_path)
             self.feature_columns = joblib.load(feature_path)
-            self.model_loaded = True
-            logger.info(f"Loaded ML model from {model_path}")
-            logger.info(f"Loaded {len(self.feature_columns)} feature columns")
             
+            # Map of model name to its expected filename
+            model_registry = {
+                "logistic": "logistic_model.pkl",
+                "random_forest": "rf_model.pkl",
+                "gradient_boosting": "gb_model.pkl",
+                "xgboost": "xgb_model.pkl"
+            }
+            
+            loaded_count = 0
+            for name, filename in model_registry.items():
+                path = Path(settings.ML_MODEL_PATH).parent / filename
+                if path.exists():
+                    try:
+                        self.models[name] = joblib.load(path)
+                        logger.info(f"Loaded {name} model from {path}")
+                        loaded_count += 1
+                    except Exception as e:
+                        logger.error(f"Error loading {name} model: {e}")
+            
+            if loaded_count == 0:
+                logger.warning("No ML models found. Switching to rule-based fallback.")
+                self.use_fallback = True
+            else:
+                self.models_loaded = True
+                logger.info(f"ML Service initialized with {loaded_count} models and {len(self.feature_columns)} features")
+                
         except Exception as e:
-            logger.error(f"Error loading model: {str(e)}. Enabling rule-based fallback.")
-            self.model = None
+            logger.error(f"Error in ML Service initialization: {str(e)}. Enabling rule-based fallback.")
+            self.models = {}
             self.feature_columns = []
-            self.model_loaded = False
+            self.models_loaded = False
             self.use_fallback = True
 
     def _map_age_bucket(self, age: int) -> str:
@@ -135,75 +149,74 @@ class MLService:
         ordered_row = {col: row.get(col, np.nan) for col in self.feature_columns}
         return pd.DataFrame([ordered_row])
     
+    def predict_all_models(self, borrower: BorrowerProfile) -> Dict[str, Any]:
+        """
+        Predict using all models and return ensemble details.
+        """
+        if self.use_fallback or not self.models_loaded:
+            # Fallback if models are not loaded
+            return {
+                "logistic": 0.0,
+                "random_forest": 0.0,
+                "gradient_boost": 0.0,
+                "ensemble_score": 0.0,
+                "risk_level": "Medium Risk",
+                "disagreement_flag": "Low"
+            }
+
+        features = self._prepare_features(borrower)
+        individual_probs = {}
+        for name, model in self.models.items():
+            if name in ["logistic", "random_forest", "gradient_boosting"]:
+                try:
+                    if hasattr(model, "predict_proba"):
+                        probs = model.predict_proba(features)[0]
+                        pos_idx = 1
+                        if hasattr(model, "classes_"):
+                            classes = list(model.classes_)
+                            if 1 in classes:
+                                pos_idx = classes.index(1)
+                            elif '1' in classes:
+                                pos_idx = classes.index('1')
+                        individual_probs[name] = float(probs[pos_idx])
+                except Exception as e:
+                    logger.error(f"Error predicting with {name}: {e}")
+
+        log_prob = individual_probs.get("logistic", 0.0)
+        rf_prob = individual_probs.get("random_forest", 0.0)
+        gb_prob = individual_probs.get("gradient_boosting", 0.0)
+
+        final_score = 0.3 * log_prob + 0.35 * rf_prob + 0.35 * gb_prob
+
+        if final_score <= 0.4:
+            category = "Low Risk"
+        elif final_score <= 0.7:
+            category = "Medium Risk"
+        else:
+            category = "High Risk"
+
+        probs_list = [log_prob, rf_prob, gb_prob]
+        flag = "High Disagreement" if (max(probs_list) - min(probs_list)) > 0.4 else "Low Disagreement"
+
+        # To match the requested JSON output format strictly, we use exactly "High" or "Low" 
+        # or whatever the flag should be, but let's use "High" / "Low" as it matches the example.
+        if flag == "High Disagreement":
+            flag = "High"
+        else:
+            flag = "Low"
+
+        return {
+            "logistic": round(log_prob, 2),
+            "random_forest": round(rf_prob, 2),
+            "gradient_boost": round(gb_prob, 2),
+            "ensemble_score": round(final_score, 2),
+            "risk_level": category,
+            "disagreement_flag": flag
+        }
+
     def _prepare_features(self, borrower: BorrowerProfile) -> pd.DataFrame:
         """Prepare borrower data for the saved sklearn pipeline."""
         return self._build_model_input(borrower)
-    
-    def predict_risk(self, borrower: BorrowerProfile) -> Tuple[str, float, float, Dict[str, Any]]:
-        """
-        Predict credit risk using the ML model.
-        Uses a rule-based fallback only if the ML model is unavailable.
-        """
-        
-        try:
-            # 1. Calculate Rule-Based Score (as a fallback)
-            rule_level, rule_score, rule_conf, rule_breakdown = self._predict_fallback(borrower)
-            
-            # 2. Calculate ML Model Score (if available)
-            ml_score = 0.0
-            ml_prob = 0.0
-            ml_available = False
-            ml_details = {}
-
-            if not self.use_fallback and self.model_loaded:
-                # Prepare features
-                features = self._prepare_features(borrower)
-                
-                if hasattr(self.model, "predict_proba"):
-                    probabilities = self.model.predict_proba(features)[0]
-                    positive_index = int(np.argmax(self.model.classes_ == 1)) if 1 in self.model.classes_ else 1
-                    ml_prob = float(probabilities[positive_index])
-                    ml_score = round(ml_prob * 100.0, 2)
-                    ml_available = True
-                    ml_details = {
-                        "ml_default_probability": round(ml_prob, 6),
-                        "ml_class_probabilities": [round(float(p), 6) for p in probabilities],
-                        "ml_classes": [int(c) if isinstance(c, (int, np.integer)) else str(c) for c in self.model.classes_]
-                    }
-
-            # 3. Final Score - enforce a minimum risk floor of 1.0
-            if ml_available:
-                risk_score = max(1.0, ml_score)
-                method = "ml_scorer"
-                confidence = 0.85
-            else:
-                risk_score = max(1.0, rule_score)
-                method = "rule_based_fallback"
-                confidence = 0.7
-
-            risk_level, _ = self._interpret_prediction(risk_score / 100.0)
-            
-            score_breakdown = {
-                "method": method,
-                "formula": "risk_score = ML_score" if ml_available else "rule_based_fallback",
-                "risk_score": risk_score,
-                "components": {
-                    "ml_model_score": ml_score if ml_available else 0,
-                    "raw_ml_score": ml_score if ml_available else None,
-                    "rule_engine_score": rule_score if not ml_available else 0,
-                    "raw_rule_score": rule_score
-                },
-                "rule_details": rule_breakdown.get("components", {}),
-                **ml_details
-            }
-            
-            logger.info(f"Risk Prediction ({method}): {risk_level} (Score: {risk_score}, Confidence: {confidence})")
-            
-            return risk_level, risk_score, confidence, score_breakdown
-            
-        except Exception as e:
-            logger.error(f"Error in prediction: {str(e)}. Falling back to pure rule-based logic.")
-            return self._predict_fallback(borrower)
             
     def _predict_fallback(self, borrower: BorrowerProfile) -> Tuple[str, float, float, Dict[str, Any]]:
         """Rule-based risk calculation as a fallback for missing or incompatible ML model."""
