@@ -30,7 +30,7 @@
 graph TD
     A[Client Application] -->|Applicant Data| B(FastAPI Backend)
     
-    subgraph Machine Learning Pipeline
+    subgraph ML_Pipeline ["Machine Learning Pipeline"]
         B --> C{Ensemble Model Evaluator}
         C -->|w1| D[Logistic Regression]
         C -->|w2| E[Random Forest]
@@ -39,11 +39,11 @@ graph TD
         G --> H[Disagreement Detection]
     end
     
-    subgraph Agentic Orchestration (LangGraph)
+    subgraph Agentic_Orchestration ["Agentic Orchestration (LangGraph)"]
         H --> I(Input Processor Node)
         I --> J(Risk Analysis Agent)
         
-        subgraph RAG System
+        subgraph RAG ["RAG System"]
             J --> K(Policy Retrieval Agent)
             K <-->|Semantic Search| L[(Qdrant Vector DB)]
         end
