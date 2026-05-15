@@ -96,9 +96,26 @@ const AIPolicySidebar = ({ data }: AIPolicySidebarProps) => {
       <div className="p-8 border-b border-white/10 bg-white/[0.02]">
         <h3 className="text-xl font-bold flex items-center gap-2">
           <Bot className="w-6 h-6 text-primary" />
-          AI Response Sidebar
+          Governance Control
         </h3>
-        <p className="text-xs text-muted-foreground mt-2 font-medium">Ask Groq about the analysis, risks, or policy outcome.</p>
+        <p className="text-xs text-muted-foreground mt-2 font-medium">Underwriting arbitration & policy enforcement.</p>
+        
+        <div className="mt-6 p-4 rounded-2xl bg-white/5 border border-white/10">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Policy Risk Score</div>
+            <div className="text-sm font-black text-white">{data.risk_analysis.policy_risk_score.toFixed(1)}</div>
+          </div>
+          <div className="w-full bg-white/10 h-1.5 rounded-full overflow-hidden">
+            <motion.div 
+              initial={{ width: 0 }}
+              animate={{ width: `${data.risk_analysis.policy_risk_score}%` }}
+              className={cn(
+                "h-full rounded-full",
+                data.risk_analysis.policy_risk_score > 60 ? "bg-red-500" : data.risk_analysis.policy_risk_score > 30 ? "bg-yellow-500" : "bg-green-500"
+              )}
+            />
+          </div>
+        </div>
       </div>
 
       <div className="p-4 border-b border-white/10">

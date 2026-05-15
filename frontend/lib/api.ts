@@ -13,12 +13,15 @@ export interface BorrowerInput {
 
 export interface RiskAnalysis {
   risk_level: string;
-  risk_score: number;
+  ml_risk_score: number;
   top_risk_factors: string[];
   positive_factors: string[];
-  confidence_score: number;
-  final_ai_score?: number;
-  ai_score_reasoning?: string;
+  financial_sanity_score: number;
+  policy_risk_score: number;
+  final_ai_score: number;
+  arbitration_summary: string;
+  prediction_confidence: number;
+  disagreement_score: number;
 }
 
 export interface PolicyMatch {

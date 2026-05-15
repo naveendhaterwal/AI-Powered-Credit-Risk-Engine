@@ -39,12 +39,16 @@ class WorkflowState:
     ml_risk_score: float = 0.0
     disagreement_flag: str = "Low"
     ml_model_scores: Dict[str, Any] = field(default_factory=dict)
-    prediction_confidence: float = 0.95
-    fallback_level_used: int = 1
     ensemble_health: str = "healthy"
     override_triggered: bool = False
     critical_flags: List[str] = field(default_factory=list)
     score_breakdown: Dict[str, Any] = field(default_factory=dict)
+    
+    # Governance & Confidence
+    prediction_confidence: float = 100.0  # 0-100 scale
+    confidence_reasoning: List[str] = field(default_factory=list)
+    ood_flag: bool = False  # Out-of-Distribution detection
+    disagreement_score: float = 0.0  # Variance between models
     
     # ========== RISK ANALYSIS AGENT OUTPUT ==========
     # From Risk Analysis Agent (LLM)
@@ -67,10 +71,12 @@ class WorkflowState:
     policy_violations: int = 0
     policy_compliances: int = 0
     
-    # ========== AI SCORING AGENT OUTPUT ==========
-    # From AI Scoring Agent (LLM)
+    # ========== RISK ARBITRATION AGENT OUTPUT ==========
+    # From Arbitration Agent (Expert Synthesis)
     final_ai_score: float = 0.0
     ai_score_reasoning: str = ""
+    arbitration_summary: str = ""
+    policy_risk_score: float = 0.0
     final_risk_level: Optional[RiskLevel] = None
     
     # ========== DECISION AGENT OUTPUT ==========
@@ -105,6 +111,9 @@ class WorkflowState:
             "disagreement_flag": self.disagreement_flag,
             "ml_model_scores": self.ml_model_scores,
             "prediction_confidence": self.prediction_confidence,
+            "confidence_reasoning": self.confidence_reasoning,
+            "ood_flag": self.ood_flag,
+            "disagreement_score": self.disagreement_score,
             "fallback_level_used": self.fallback_level_used,
             "ensemble_health": self.ensemble_health,
             "override_triggered": self.override_triggered,
@@ -114,6 +123,8 @@ class WorkflowState:
             "policy_matches": self.policy_matches,
             "final_ai_score": self.final_ai_score,
             "ai_score_reasoning": self.ai_score_reasoning,
+            "arbitration_summary": self.arbitration_summary,
+            "policy_risk_score": self.policy_risk_score,
             "final_risk_level": self.final_risk_level.value if self.final_risk_level else None,
             "final_decision": self.final_decision,
             "agent_interactions": self.agent_interactions,

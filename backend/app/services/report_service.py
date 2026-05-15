@@ -47,12 +47,15 @@ class ReportService:
 			"request_id": state.request_id,
 			"risk_analysis": {
 				"risk_level": risk_str,
-				"risk_score": state.ml_risk_score,
+				"ml_risk_score": state.ml_risk_score,
 				"top_risk_factors": risk.get("top_risk_factors", []),
 				"positive_factors": risk.get("positive_factors", []),
-				"confidence_score": risk.get("confidence_score", 0.7),
+				"financial_sanity_score": risk.get("financial_sanity_score", 70.0),
+				"policy_risk_score": state.policy_risk_score,
 				"final_ai_score": state.final_ai_score,
-				"ai_score_reasoning": state.ai_score_reasoning,
+				"arbitration_summary": state.arbitration_summary,
+				"prediction_confidence": state.prediction_confidence,
+				"disagreement_score": state.disagreement_score,
 			},
 			"policy_retrieval": {
 				"rules_checked": len(state.policy_matches),

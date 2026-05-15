@@ -5,6 +5,7 @@ Loads and uses the credit risk prediction model.
 
 import joblib
 import logging
+import json
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -32,49 +33,49 @@ class MLService:
         self._load_models()
     
     def _load_models(self):
-        """Load multiple ML models and preprocessing pipeline from disk"""
+        """Load multiple ML pipelines from disk"""
         try:
-            feature_path = Path(settings.FEATURE_COLUMNS_PATH)
-            preprocessor_path = Path(settings.ML_MODEL_PATH).parent / "preprocessing_pipeline.pkl"
+            model_dir = Path(settings.ML_MODEL_PATH).parent
+            metadata_path = model_dir / "feature_metadata.json"
             
-            if not feature_path.exists() or not preprocessor_path.exists():
-                logger.warning("Models, features, or preprocessor not found. Switching to rule-based fallback.")
+            if not metadata_path.exists():
+                logger.warning("Feature metadata not found. Switching to rule-based fallback.")
                 self.use_fallback = True
                 return
             
-            self.feature_columns = joblib.load(feature_path)
-            self.preprocessor = joblib.load(preprocessor_path)
+            with open(metadata_path, 'r') as f:
+                metadata = json.load(f)
+                self.feature_columns = metadata["expected_features"]
             
             # Map of model name to its expected filename
             model_registry = {
-                "logistic": "logistic_model.pkl",
-                "random_forest": "rf_model.pkl",
-                "gradient_boosting": "gb_model.pkl"
+                "logistic": "logistic_pipeline.pkl",
+                "random_forest": "rf_pipeline.pkl",
+                "gradient_boosting": "gb_pipeline.pkl"
             }
             
             loaded_count = 0
             for name, filename in model_registry.items():
-                path = Path(settings.ML_MODEL_PATH).parent / filename
+                path = model_dir / filename
                 if path.exists():
                     try:
                         self.models[name] = joblib.load(path)
-                        logger.info(f"Loaded {name} model from {path}")
+                        logger.info(f"Loaded {name} pipeline from {path}")
                         loaded_count += 1
                     except Exception as e:
-                        logger.error(f"Error loading {name} model: {e}")
+                        logger.error(f"Error loading {name} pipeline: {e}")
             
             if loaded_count == 0:
-                logger.warning("No ML models found. Switching to rule-based fallback.")
+                logger.warning("No ML pipelines found. Switching to rule-based fallback.")
                 self.use_fallback = True
             else:
                 self.models_loaded = True
-                logger.info(f"ML Service initialized with {loaded_count} models and preprocessing pipeline.")
+                logger.info(f"ML Service initialized with {loaded_count} calibrated pipelines.")
                 
         except Exception as e:
             logger.error(f"Error in ML Service initialization: {str(e)}. Enabling rule-based fallback.")
             self.models = {}
             self.feature_columns = []
-            self.preprocessor = None
             self.models_loaded = False
             self.use_fallback = True
 
@@ -149,12 +150,9 @@ class MLService:
         ordered_row = {col: row.get(col, np.nan) for col in self.feature_columns}
         return pd.DataFrame([ordered_row])
         
-    def _prepare_features(self, borrower: BorrowerProfile) -> np.ndarray:
-        """Prepare borrower data using the scikit-learn preprocessing pipeline."""
-        df = self._build_model_input(borrower)
-        if self.preprocessor:
-            return self.preprocessor.transform(df)
-        return df.to_numpy()
+    def _prepare_features(self, borrower: BorrowerProfile) -> pd.DataFrame:
+        """Build the raw DataFrame for the ML pipeline."""
+        return self._build_model_input(borrower)
             
     def _predict_fallback(self, borrower: BorrowerProfile) -> Tuple[str, float, float, Dict[str, Any]]:
         """Rule-based risk calculation as a fallback for missing or incompatible ML model."""
@@ -167,7 +165,7 @@ class MLService:
         total_risk = base_risk + foir_penalty + dti_penalty + employment_bonus
         total_risk = max(1.0, min(100, total_risk))
         
-        risk_level, _ = self._interpret_prediction(total_risk / 100.0)
+        risk_level, _ = self._interpret_prediction(total_risk)
         
         score_breakdown = {
             "method": "rule_based_fallback",
@@ -178,17 +176,73 @@ class MLService:
             },
         }
 
-        return risk_level, round(total_risk, 2), 0.7, score_breakdown
+
     
-    def _interpret_prediction(self, prediction: float) -> Tuple[str, float]:
-        risk_score = float(prediction * 100)
-        if risk_score < 40:
+    def detect_ood(self, borrower: BorrowerProfile) -> Tuple[bool, List[str]]:
+        """
+        Detect Out-of-Distribution (OOD) scenarios using expert financial boundaries.
+        """
+        reasons = []
+        # Extreme Financial Ratios
+        if borrower.foir > 1.2: reasons.append("Extreme FOIR (>120%) detected")
+        if borrower.dti > 0.8: reasons.append("Extreme DTI (>80%) detected")
+        
+        # Unrealistic Borrowers
+        if borrower.credit_score < 300 or borrower.credit_score > 900:
+            reasons.append(f"Invalid Credit Score ({borrower.credit_score})")
+        
+        # Extreme Loan Size Relative to Income
+        annual_income = borrower.monthly_income * 12
+        if annual_income > 0 and (borrower.loan_amount_requested / annual_income) > 20:
+            reasons.append("Loan amount exceeds 20x annual income")
+            
+        return len(reasons) > 0, reasons
+
+    def calculate_confidence(self, 
+        models_active: int, 
+        disagreement_score: float, 
+        is_ood: bool, 
+        fallback_level: int
+    ) -> Tuple[float, List[str]]:
+        """
+        Governance logic for confidence calculation.
+        """
+        base = 100.0
+        reasons = []
+        
+        # Penalty for inactive models
+        if models_active < 3:
+            penalty = (3 - models_active) * 20
+            base -= penalty
+            reasons.append(f"Reduced by {penalty}% due to degraded ensemble ({models_active}/3 active)")
+            
+        # Penalty for model disagreement
+        if disagreement_score > 30:
+            penalty = min(25, disagreement_score / 2)
+            base -= penalty
+            reasons.append(f"Reduced by {round(penalty, 1)}% due to high model disagreement")
+            
+        # Penalty for OOD
+        if is_ood:
+            base -= 40
+            reasons.append("Critical reduction (40%) due to Out-of-Distribution data")
+            
+        # Penalty for fallback usage
+        if fallback_level >= 3:
+            base -= 15
+            reasons.append("Reduced by 15% due to fallback logic usage")
+            
+        return max(10.0, base), reasons
+
+    def _interpret_prediction(self, prediction_100: float) -> Tuple[str, float]:
+        """Interpret risk score on 0-100 scale."""
+        if prediction_100 < 40:
             risk_level = "Low"
-        elif risk_score < 60:
+        elif prediction_100 < 65:
             risk_level = "Medium"
         else:
             risk_level = "High"
-        return risk_level, risk_score
+        return risk_level, prediction_100
 
     def predict_all_models(self, borrower: BorrowerProfile) -> Dict[str, Any]:
         """
@@ -201,13 +255,13 @@ class MLService:
         calculated_ltv = (borrower.loan_amount_requested / (borrower.loan_amount_requested / 0.8)) * 100 if borrower.loan_amount_requested > 0 else 0
         
         if borrower.credit_score < 550:
-            return self._build_deterministic_override("Reject", ["Low Credit Score"], "Credit score below 550 is an automatic reject.")
+            return self._build_deterministic_override("Reject", ["Low Credit Score"], "Credit score below 550 threshold for standard underwriting.")
         if calculated_ltv > 120:
-            return self._build_deterministic_override("Reject", ["High LTV"], "LTV exceeds 120% limit for standard underwriting.")
-        if borrower.foir * 100 > 55:
-            return self._build_deterministic_override("Reject", ["Extreme FOIR"], "FOIR exceeds 55%, violating ability-to-repay regulations.")
+            return self._build_deterministic_override("Reject", ["High LTV"], "Loan-to-Value ratio exceeds 120% regulatory limit.")
+        if borrower.foir * 100 > 60:
+            return self._build_deterministic_override("Reject", ["Extreme FOIR"], "FOIR exceeds 60% internal safety threshold.")
         if borrower.monthly_income <= 0:
-            return self._build_deterministic_override("Manual Review", ["Zero Income"], "Income reported as 0 requires manual verification.")
+            return self._build_deterministic_override("Manual Review", ["Zero Income"], "Income reporting error: requires manual verification.")
 
         # ==========================================================
         # LEVELS 1-2: ENSEMBLE ML EXECUTION
@@ -288,30 +342,34 @@ class MLService:
             ensemble_health = "critical"
             base_confidence = 0.35
             
-        category, _ = self._interpret_prediction(final_score / 100.0)
+        category, _ = self._interpret_prediction(final_score)
 
-        flag = "Low"
+        # Confidence & OOD Governance
+        is_ood, ood_reasons = self.detect_ood(borrower)
+        
+        disagreement_score = 0.0
         if models_active > 1:
             scores_list = list(successful_models.values())
-            disagreement = (max(scores_list) - min(scores_list)) > 40.0
-            if disagreement:
-                flag = "High"
-                base_confidence -= 0.15
+            disagreement_score = max(scores_list) - min(scores_list)
             
-        prediction_confidence = round(max(0.1, base_confidence), 2)
+        confidence_val, confidence_reasons = self.calculate_confidence(
+            models_active, disagreement_score, is_ood, fallback_level
+        )
 
         return {
-            "ml_ensemble_score": round(final_score / 100.0, 2), # normalized to 0-1
+            "ml_ensemble_score": round(final_score, 2), # 0-100 scale
             "override_triggered": False,
-            "critical_flags": [],
+            "critical_flags": ood_reasons,
+            "ood_flag": is_ood,
             "risk_level": category,
-            "prediction_confidence": prediction_confidence,
+            "prediction_confidence": confidence_val,
+            "confidence_reasoning": confidence_reasons,
+            "disagreement_score": round(disagreement_score, 2),
             "fallback_level_used": fallback_level,
             "ensemble_health": ensemble_health,
-            "disagreement_flag": flag,
             "models": models_output,
-            "recommendation": "Pending AI Review",
-            "reasoning": "Ensemble execution completed."
+            "recommendation": "Pending AI Arbitration",
+            "reasoning": "Ensemble statistical baseline established."
         }
 
     def _execute_level_4_fallback(self, borrower: BorrowerProfile, models_output: dict, reason: str) -> Dict[str, Any]:
@@ -321,14 +379,16 @@ class MLService:
             risk_level += " Risk"
             
         return {
-            "ml_ensemble_score": round(total_risk / 100.0, 2),
+            "ml_ensemble_score": round(total_risk, 2),
             "override_triggered": False,
-            "critical_flags": ["Model Inference Failed"],
+            "critical_flags": ["Model Inference Failed", reason],
+            "ood_flag": False,
             "risk_level": risk_level,
-            "prediction_confidence": 0.20,
+            "prediction_confidence": 20.0,
+            "confidence_reasoning": ["Forced reduction due to system failure"],
+            "disagreement_score": 0.0,
             "fallback_level_used": 4,
             "ensemble_health": "failed",
-            "disagreement_flag": "N/A",
             "models": models_output,
             "recommendation": "Manual Review",
             "reasoning": f"ML pipeline unavailable ({reason}). Rule-based assessment used."
@@ -337,14 +397,16 @@ class MLService:
     def _build_deterministic_override(self, recommendation: str, flags: List[str], reasoning: str) -> Dict[str, Any]:
         """Bypass ML to enforce deterministic banking limits."""
         return {
-            "ml_ensemble_score": 1.0 if recommendation == "Reject" else 0.5,
+            "ml_ensemble_score": 100.0 if recommendation == "Reject" else 60.0,
             "override_triggered": True,
             "critical_flags": flags,
+            "ood_flag": True,
             "risk_level": "High Risk",
-            "prediction_confidence": 1.0, # Deterministic rules are 100% confident
+            "prediction_confidence": 100.0, 
+            "confidence_reasoning": ["Deterministic banking threshold violation"],
+            "disagreement_score": 0.0,
             "fallback_level_used": 3,
-            "ensemble_health": "healthy", # Skipped intentionally, but engine is healthy
-            "disagreement_flag": "N/A",
+            "ensemble_health": "healthy",
             "models": {},
             "recommendation": recommendation,
             "reasoning": reasoning

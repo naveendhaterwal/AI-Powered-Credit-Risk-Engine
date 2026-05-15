@@ -1,520 +1,204 @@
 """
 Groq LLM Service
-Handles calls to Groq API for AI agent responses.
+Orchestrates multiple AI agents for risk analysis, policy evaluation, and lending decisions.
 """
 
-import logging
+import os
 import json
-from typing import Optional
-
+import logging
+import re
+from typing import Dict, Any, List, Optional, Tuple
 from groq import Groq
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-
 class GroqService:
-    """
-    Service for interacting with Groq LLM.
-    Used by AI agents to generate analysis and decisions.
-    """
+    """Base service for interacting with Groq Cloud API."""
     
     def __init__(self):
-        """Initialize Groq client"""
-        self.client = None
+        self.api_key = settings.GROQ_API_KEY
+        if not self.api_key:
+            logger.warning("⚠️ GROQ_API_KEY not found in settings")
+        self.client = Groq(api_key=self.api_key)
         self.model = settings.GROQ_MODEL
-        self._initialize_client()
-    
-    def _initialize_client(self):
-        """Create Groq client"""
+
+    def call_llm(self, prompt: str, system_prompt: str = "You are a helpful assistant.", temperature: float = 0.2) -> str:
+        """Call Groq API with given prompts."""
         try:
-            if not settings.GROQ_API_KEY:
-                logger.warning("GROQ_API_KEY not set in environment")
-                return
-            
-            self.client = Groq(api_key=settings.GROQ_API_KEY)
-            logger.info("✓ Groq client initialized")
-            
-        except Exception as e:
-            logger.error(f"Error initializing Groq client: {str(e)}")
-            self.client = None
-    
-    def call_llm(
-        self,
-        prompt: str,
-        system_prompt: Optional[str] = None,
-        temperature: float = 0.3,
-        max_tokens: int = 500
-    ) -> str:
-        """
-        Call Groq LLM with a prompt.
-        
-        Args:
-            prompt: User message
-            system_prompt: System context
-            temperature: Creativity (0=deterministic, 1=creative)
-            max_tokens: Max response length
-            
-        Returns:
-            Response text from LLM
-        """
-        
-        try:
-            # Strict mode: caller decides fallback behavior.
-            if not self.client:
-                raise RuntimeError("Groq client not initialized")
-            
-            # Build messages
-            messages = []
-            
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            
-            messages.append({"role": "user", "content": prompt})
-            
-            # Call Groq API
-            response = self.client.chat.completions.create(
+            chat_completion = self.client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
                 model=self.model,
-                messages=messages,
                 temperature=temperature,
-                max_tokens=max_tokens,
-                top_p=0.95,
-                stream=False
+                response_format={"type": "json_object"}
             )
-            
-            # Extract response text
-            result = response.choices[0].message.content
-            
-            logger.info(f"LLM Response: {len(result)} characters")
-            return result
-            
+            return chat_completion.choices[0].message.content
         except Exception as e:
-            logger.error(f"Error calling Groq API: {str(e)}")
-            raise
+            logger.error(f"❌ Groq API Call Failed: {str(e)}")
+            raise e
 
     def _extract_json(self, text: str) -> dict:
-        """Helper to extract and parse JSON from LLM response strings which may include markdown tags."""
-        logger.debug(f"Attempting to extract JSON from: {text[:100]}...")
-        clean_text = text.strip()
-        
-        # Remove markdown code blocks if present
-        if clean_text.startswith("```"):
-            # Look for the start of the actual JSON content
-            first_brace = clean_text.find("{")
-            last_brace = clean_text.rfind("}")
-            if first_brace != -1 and last_brace != -1:
-                clean_text = clean_text[first_brace : last_brace + 1]
-        
+        """Parse JSON from LLM response."""
         try:
-            return json.loads(clean_text)
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON from cleaned text: {e}")
-            # Fallback attempt: find the first { and last } if not already tried
-            first_brace = clean_text.find("{")
-            last_brace = clean_text.rfind("}")
-            if first_brace != -1 and last_brace != -1:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            # Fallback for malformed JSON
+            match = re.search(r'\{.*\}', text, re.DOTALL)
+            if match:
                 try:
-                    return json.loads(clean_text[first_brace : last_brace + 1])
+                    return json.loads(match.group())
                 except:
                     pass
-            raise
-
+            return {"error": "Failed to parse JSON"}
 
 class RiskAnalysisAgent:
-    """Agent for analyzing credit risk"""
+    """Agent for deep financial borrower analysis."""
     
     def __init__(self, groq_service: GroqService):
         self.groq = groq_service
     
-    def analyze(self, borrower_data: dict, risk_score: float, risk_level: str) -> dict:
-        """
-        Analyze risk factors for borrower.
-        
-        Returns dict with top_risk_factors, positive_factors, etc.
-        """
-        
-        system_prompt = """You are a credit risk analyst.
-Analyze the borrower's profile and provide specific risk factors.
-Format your response as a flat JSON object with these EXACT keys:
-- "top_risk_factors": (List of strings)
-- "positive_factors": (List of strings)
-- "confidence_score": (Float between 0 and 1)
-- "risk_level": (String: "Low", "Medium", or "High")
+    def analyze(self, borrower_data: dict, ml_score: float) -> Tuple[dict, dict]:
+        system_prompt = """You are a Senior Credit Risk Analyst. 
+Your role is to analyze the borrower's financial profile with clinical precision.
+Focus on:
+1. Debt-to-Income (DTI) and Fixed Obligation (FOIR) ratios.
+2. Income stability vs Loan burden.
+3. Creditworthiness metrics.
 
-Do not nest these keys inside another object."""
-        
-        user_prompt = f"""
-Analyze this borrower's credit risk:
-- Age: {borrower_data.get('age')}
-- Credit Score: {borrower_data.get('credit_score')}
-- Monthly Income: {borrower_data.get('monthly_income')}
-- Employment: {borrower_data.get('employment_type')}
-- FOIR: {borrower_data.get('foir')}
-- DTI: {borrower_data.get('dti')}
-- Loan Amount: {borrower_data.get('loan_amount_requested')}
+Output must be concise, professional, and audit-ready. Avoid generic filler.
+Return a JSON object with:
+- "top_risk_factors": List[str]
+- "positive_factors": List[str]
+- "analysis_summary": str
+- "financial_sanity_score": float (0-100, where 100 is perfectly healthy)"""
 
-ML Risk Score: {risk_score}
-ML Risk Level: {risk_level}
-
-Provide the analysis as a JSON object."""
+        user_prompt = f"""Analyze the following borrower financials:
+{json.dumps(borrower_data, indent=2)}
+Baseline ML Risk Score: {ml_score}"""
         
         try:
             response = self.groq.call_llm(user_prompt, system_prompt, temperature=0.1)
-            raw_result = self.groq._extract_json(response)
-            
-            # --- NORMALIZATION LAYER ---
-            # Handle potential nesting (e.g., creditRiskAnalysis)
-            if "creditRiskAnalysis" in raw_result:
-                raw_result.update(raw_result.pop("creditRiskAnalysis"))
-            
-            # Map camelCase to snake_case
-            mapping = {
-                "topRiskFactors": "top_risk_factors",
-                "topPositiveFactors": "positive_factors",
-                "positiveFactors": "positive_factors",
-                "confidenceScore": "confidence_score",
-                "riskLevel": "risk_level"
-            }
-            
-            result = {}
-            for k, v in raw_result.items():
-                target_key = mapping.get(k, k)
-                result[target_key] = v
-            
-            # Ensure required keys exist
-            result.setdefault("top_risk_factors", [])
-            result.setdefault("positive_factors", [])
-            result.setdefault("confidence_score", 0.7)
-            
-            # Flatten objects to strings if needed (LLM sometimes returns objects in factors)
-            for factor_key in ["top_risk_factors", "positive_factors"]:
-                processed = []
-                for item in result.get(factor_key, []):
-                    if isinstance(item, dict):
-                        # Extract "factor" or "description" string
-                        processed.append(item.get("factor") or item.get("description") or str(item))
-                    else:
-                        processed.append(str(item))
-                result[factor_key] = processed
-
-            result["agent_source"] = "groq"
-            result["warnings"] = []
-            
-            # Metadata for logging
-            interaction = {
-                "agent": "Risk Analysis Agent",
-                "system_prompt": system_prompt,
-                "prompt": user_prompt,
-                "response": response
-            }
+            result = self.groq._extract_json(response)
+            interaction = {"agent": "Risk Analysis Agent", "response": response}
             return result, interaction
         except Exception as exc:
-            if settings.STRICT_NO_FALLBACKS:
-                raise RuntimeError(f"Risk Analysis Agent failed in strict mode: {exc}") from exc
+            return {"top_risk_factors": ["Analysis failure"], "financial_sanity_score": 50.0}, {"error": str(exc)}
 
-            # Deterministic fallback without fabricated narrative text.
-            risk_factors = []
-            positive_factors = []
-            
-            # ... (omitted for brevity in chunking, will keep existing fallback logic)
-            # Actually I need to include it or it will be deleted.
-            if borrower_data.get("foir", 0.0) > 0.45:
-                risk_factors.append("FOIR above 45% threshold")
-            else:
-                positive_factors.append("FOIR within threshold")
-
-            if borrower_data.get("dti", 0.0) > 0.40:
-                risk_factors.append("DTI above 40% threshold")
-            else:
-                positive_factors.append("DTI within threshold")
-
-            credit_score = int(borrower_data.get("credit_score", 0))
-            if credit_score < 600:
-                risk_factors.append("Credit score below 600")
-            elif credit_score >= 700:
-                positive_factors.append("Credit score is strong")
-
-            if not risk_factors:
-                risk_factors.append("No major threshold breach detected")
-
-            if not positive_factors:
-                positive_factors.append("Limited positive factors from current threshold checks")
-
-            fallback_result = {
-                "top_risk_factors": risk_factors,
-                "positive_factors": positive_factors,
-                "confidence_score": 0.70,
-                "agent_source": "fallback",
-                "warnings": [f"Risk analysis fallback used: {exc}"],
-            }
-            interaction = {
-                "agent": "Risk Analysis Agent",
-                "system_prompt": system_prompt,
-                "prompt": user_prompt,
-                "response": json.dumps(fallback_result, indent=2),
-                "error": str(exc)
-            }
-            return fallback_result, interaction
-
-
-class LendingDecisionAgent:
-    """Agent for making lending decisions"""
-    
-    def __init__(self, groq_service: GroqService):
-        self.groq = groq_service
-    
-    def decide(
-        self,
-        model_scores: dict,
-        ml_risk_level: str,
-        ml_risk_score: float,
-        disagreement_flag: str,
-        prediction_confidence: float,
-        fallback_level_used: int,
-        ensemble_health: str,
-        override_triggered: bool,
-        critical_flags: list,
-        policy_matches: list,
-        borrower_data: dict
-    ) -> dict:
-        """
-        Make final lending decision based on risk and policies.
-        
-        Returns dict with recommendation, reasoning.
-        """
-        
-        system_prompt = """You are a lending decision expert.
-Make clear, justifiable lending decisions based on the ensemble model scores, risk profile, and policy matches.
-If a deterministic override was triggered (`override_triggered=True`), you MUST honor the hard-coded critical flags and explain why the rule engine intervened.
-If the ML ensemble health is degraded or critical, you MUST acknowledge the model failure and adjust your recommendation conservatively.
-If multiple models fail or prediction confidence is low (< 0.6), you MUST recommend "Manual Review" or "Reject".
-If the models disagree (High Disagreement), you MUST explain the differences between the models.
-You MUST justify your final recommendation using both the policy rules and the ML scores.
-Format your response as a flat JSON object with these EXACT keys:
-- "recommendation": (String: "Approve", "Approve with conditions", "Manual Review", or "Reject")
-- "reasoning": (String, detailed explanation addressing model health, score differences, and justification for the final recommendation)
-
-Do not nest these keys inside another object."""
-        
-        user_prompt = f"""
-Make a lending decision for:
-Ensemble Risk Score: {ml_risk_score} ({ml_risk_level})
-Ensemble Health: {ensemble_health}
-Prediction Confidence: {prediction_confidence}
-Fallback Level Used: {fallback_level_used}
-Model Disagreement Flag: {disagreement_flag}
-Individual Model Scores & Status: {json.dumps(model_scores, indent=2)}
-
-Deterministic Hard Rules:
-Override Triggered: {override_triggered}
-Critical Flags: {json.dumps(critical_flags)}
-
-Borrower Profile:
-- FOIR: {borrower_data.get('foir')}
-- DTI: {borrower_data.get('dti')}
-- Credit Score: {borrower_data.get('credit_score')}
-- Monthly Income: {borrower_data.get('monthly_income')}
-- Requested Loan: {borrower_data.get('loan_amount_requested')}
-
-Policy Violations / Compliances:
-{json.dumps([p.get('rule_text') for p in policy_matches], indent=2)}
-
-Provide the final decision as a JSON object."""
-        
-        try:
-            response = self.groq.call_llm(user_prompt, system_prompt, temperature=0.1)
-            raw_result = self.groq._extract_json(response)
-            
-            # --- NORMALIZATION LAYER ---
-            result = {}
-            result["recommendation"] = raw_result.get("recommendation", "Manual Review")
-            result["reasoning"] = raw_result.get("reasoning", "Decision generated by AI agent")
-
-            result.setdefault("recommendation", "Manual Review")
-            result.setdefault("reasoning", "Decision generated by AI agent")
-
-            result["agent_source"] = "groq"
-            result["warnings"] = []
-            
-            interaction = {
-                "agent": "Decision Agent",
-                "system_prompt": system_prompt,
-                "prompt": user_prompt,
-                "response": response
-            }
-            return result, interaction
-        except Exception as exc:
-            if settings.STRICT_NO_FALLBACKS:
-                raise RuntimeError(f"Lending Decision Agent failed in strict mode: {exc}") from exc
-
-            violations = len([p for p in policy_matches if p.get("status") == "Violated"])
-            if violations >= 2:
-                recommendation = "Reject"
-                reason = "Multiple policy violations detected"
-            elif violations == 1:
-                recommendation = "Manual Review"
-                reason = "Single policy violation requires underwriter review"
-            else:
-                recommendation = "Approve"
-                reason = "No policy violations detected"
-
-            fallback_result = {
-                "recommendation": recommendation,
-                "reasoning": reason,
-                "agent_source": "fallback",
-                "warnings": [f"Decision fallback used: {exc}"],
-            }
-            interaction = {
-                "agent": "Decision Agent",
-                "system_prompt": system_prompt,
-                "prompt": user_prompt,
-                "response": json.dumps(fallback_result, indent=2),
-                "error": str(exc)
-            }
-            return fallback_result, interaction
-
-
-class ChatAgent:
-    """Agent for interactive chat about a credit report"""
+class PolicyAgent:
+    """Agent for compliance and policy evaluation."""
     
     def __init__(self, groq_service: GroqService):
         self.groq = groq_service
         
-    def chat(self, report_data: dict, user_message: str) -> dict:
-        # Filter report data to stay under token limits
-        essential_data = {
-            "borrower_name": report_data.get("borrower_name"),
-            "risk_analysis": report_data.get("risk_analysis"),
-            "policy_matches": report_data.get("policy_retrieval", {}).get("policies_matched", []),
-            "lending_decision": report_data.get("lending_decision"),
-            "financials": {
-                "foir": report_data.get("foir"),
-                "dti": report_data.get("dti"),
-                "proposed_emi": report_data.get("proposed_emi")
-            }
-        }
-        
-        system_prompt = f"""You are a helpful credit risk advisor. 
-Discuss this loan decision based ONLY on this data:
-{json.dumps(essential_data, indent=2)}
+    def evaluate(self, policy_matches: list, borrower_data: dict) -> Tuple[dict, dict]:
+        system_prompt = """You are a Banking Compliance Officer.
+Your role is to evaluate the borrower against internal lending policies.
+Focus on:
+1. Critical violations.
+2. Compliance exceptions.
+3. Policy-based risk weighting.
 
-Answer concisely and professionally."""
+Return a JSON object with:
+- "policy_risk_score": float (0-100, 100 is maximum violation)
+- "critical_violations": List[str]
+- "compliance_summary": str
+- "severity_level": str ("Critical", "Warning", "Info")"""
 
-        try:
-            response = self.groq.call_llm(user_message, system_prompt, temperature=0.3, max_tokens=1000)
-            return {"answer": response, "model_source": "groq"}
-        except Exception as exc:
-            # Check if it's a rate limit / token limit error to provide a better message
-            error_msg = str(exc)
-            if "Limit 6000" in error_msg or "tokens" in error_msg:
-                return {"answer": "The report is too large for the current AI model limit. Please try a shorter question or contact support.", "model_source": "error"}
-            return {"answer": f"I'm sorry, I cannot analyze the report right now.", "model_source": "fallback"}
-
-class AIScoringAgent:
-    """Agent for synthesizing final risk score based on ML, policies, and strengths"""
-    
-    def __init__(self, groq_service: GroqService):
-        self.groq = groq_service
-        
-    def evaluate(
-        self, 
-        ml_score: float, 
-        ml_level: str,
-        prediction_confidence: float,
-        fallback_level_used: int,
-        ensemble_health: str,
-        override_triggered: bool,
-        critical_flags: list,
-        risk_analysis: dict,
-        policy_matches: list,
-        borrower_data: dict,
-        model_scores: Optional[dict] = None
-    ) -> dict:
-        """
-        Produce a final AI-synthesized risk score.
-        
-        Returns dict with final_score (0-100) and reasoning.
-        """
-        
-        system_prompt = """You are a senior credit risk evaluator.
-Your task is to provide the FINAL risk score for a loan applicant.
-You must take the baseline Machine Learning (ML) score and refine it using:
-1. Company lending policies (retrieved as chunks).
-2. Qualitative strengths and weaknesses.
-3. Financial ratios (FOIR, DTI).
-4. System Health (Ensemble Health, Confidence, Fallback Level).
-
-The ML score is a mathematical baseline, but your AI score is the final human-like judgment that considers policy nuances and system reliability.
-
-CRITICAL: If a deterministic override was triggered by the hard rule engine, you MUST respect it and increase the score appropriately.
-CRITICAL: If there are policy violations (e.g., FOIR > 50% for salaried), you MUST increase the risk score significantly (at least 60-70 or higher).
-CRITICAL: If the ML ensemble health is degraded or failed, or confidence is low, you MUST adjust the score conservatively (higher risk) to account for model unreliability. Never return a low score if the system is failing.
-
-Format your response as a flat JSON object with these EXACT keys:
-- "final_score": (Float between 0 and 100, where 0 is safest and 100 is riskiest)
-- "reasoning": (String, detailed explanation of how the ML score was adjusted based on company policy, borrower profile, and system health)
-
-Do not nest these keys."""
-
-        user_prompt = f"""
-ML Consensus Breakdown:
-{json.dumps(model_scores or {{"baseline_model": ml_score}}, indent=2)}
-
-Ensemble Baseline Score: {ml_score} ({ml_level})
-Ensemble Health: {ensemble_health}
-Prediction Confidence: {prediction_confidence}
-Fallback Level Used: {fallback_level_used}
-
-Deterministic Hard Rules:
-Override Triggered: {override_triggered}
-Critical Flags: {json.dumps(critical_flags)}
-
-Positive strengths: {json.dumps(risk_analysis.get('positive_factors', []))}
-Negative weaknesses: {json.dumps(risk_analysis.get('top_risk_factors', []))}
-
-Company Policy Snippets:
-{json.dumps([p.get('rule_text') for p in policy_matches], indent=2)}
-
-Borrower Ratios:
-- FOIR: {borrower_data.get('foir')}
-- DTI: {borrower_data.get('dti')}
-
-Calculate final risk score based on the above context. Explain your reasoning for the chosen final score in the 'reasoning' field, specifically addressing any model failures or confidence drops."""
+        user_prompt = f"""Evaluate policy compliance for:
+{json.dumps(borrower_data, indent=2)}
+Retrieved Policy Snippets:
+{json.dumps(policy_matches, indent=2)}"""
 
         try:
             response = self.groq.call_llm(user_prompt, system_prompt, temperature=0.1)
             result = self.groq._extract_json(response)
-            
-            # Normalization
-            final_score = result.get("final_score", ml_score)
-            reasoning = result.get("reasoning", "Score determined by AI synthesis of ML and policy context.")
-            
-            interaction = {
-                "agent": "AI Scoring Agent",
-                "system_prompt": system_prompt,
-                "prompt": user_prompt,
-                "response": response
-            }
-            return {"final_score": final_score, "reasoning": reasoning}, interaction
-            
+            interaction = {"agent": "Policy Agent", "response": response}
+            return result, interaction
         except Exception as exc:
-            logger.error(f"Error in AI Scoring Agent: {exc}")
-            # Fallback to ML score
-            fallback_result = {
-                "final_score": ml_score,
-                "reasoning": f"AI Scoring failed, falling back to ML baseline. Error: {str(exc)}"
-            }
-            interaction = {
-                "agent": "AI Scoring Agent",
-                "error": str(exc),
-                "response": "Fallback to ML score"
-            }
-            return fallback_result, interaction
+            return {"policy_risk_score": 0.0, "critical_violations": []}, {"error": str(exc)}
 
+class ArbitrationAgent:
+    """Agent for resolving conflicts between ML and Policies."""
+    
+    def __init__(self, groq_service: GroqService):
+        self.groq = groq_service
+        
+    def arbitrate(self, ml_data: dict, risk_analysis: dict, policy_data: dict) -> Tuple[dict, dict]:
+        system_prompt = """You are a Principal Risk Arbitrator on the Credit Committee.
+Your role is to weigh statistical ML predictions against policy compliance and system reliability.
+You must decide if the ML output is trustworthy or if policy violations necessitate an override.
+
+Analyze Model Disagreement and Confidence Degradation.
+Return a JSON object with:
+- "final_ai_score": float (0-100)
+- "arbitration_summary": str (Justify why ML score was adjusted or upheld)
+- "trust_level": str ("High", "Degraded", "Low")
+- "escalation_required": bool"""
+
+        user_prompt = f"""Perform risk arbitration:
+ML Ensemble Data: {json.dumps(ml_data, indent=2)}
+Risk Analysis: {json.dumps(risk_analysis, indent=2)}
+Policy Evaluation: {json.dumps(policy_data, indent=2)}"""
+
+        try:
+            response = self.groq.call_llm(user_prompt, system_prompt, temperature=0.1)
+            result = self.groq._extract_json(response)
+            interaction = {"agent": "Arbitration Agent", "response": response}
+            return result, interaction
+        except Exception as exc:
+            return {"final_ai_score": ml_data.get('ml_ensemble_score', 50.0)}, {"error": str(exc)}
+
+class LendingDecisionAgent:
+    """Agent for final operational recommendation."""
+    
+    def __init__(self, groq_service: GroqService):
+        self.groq = groq_service
+        
+    def decide(self, arbitration_data: dict, risk_level: str) -> Tuple[dict, dict]:
+        system_prompt = """You are the Chief Lending Officer.
+Your role is to issue the final operational recommendation.
+Your reasoning must be concise, ratio-driven, and auditor-ready.
+
+Return a JSON object with:
+- "recommendation": "Approve" | "Approve with Conditions" | "Manual Review" | "Reject"
+- "primary_reason": str (Executive reasoning)
+- "secondary_reasons": List[str]
+- "suggested_action": str"""
+
+        user_prompt = f"""Finalize lending decision:
+Arbitration Summary: {arbitration_data.get('arbitration_summary')}
+Risk Level: {risk_level}
+Arbitrated Score: {arbitration_data.get('final_ai_score')}"""
+
+        try:
+            response = self.groq.call_llm(user_prompt, system_prompt, temperature=0.1)
+            result = self.groq._extract_json(response)
+            interaction = {"agent": "Decision Agent", "response": response}
+            return result, interaction
+        except Exception as exc:
+            return {"recommendation": "Manual Review"}, {"error": str(exc)}
+
+class ChatAgent:
+    """Agent for interactive Q&A about the report."""
+    def __init__(self, groq_service: GroqService):
+        self.groq = groq_service
+        
+    def chat(self, message: str, report_data: dict) -> dict:
+        system_prompt = "You are a Credit Risk Advisor. Answer questions about the credit report."
+        user_prompt = f"Report Data: {json.dumps(report_data)}\nQuestion: {message}"
+        try:
+            response = self.groq.call_llm(user_prompt, system_prompt)
+            return {"answer": response, "model_source": "groq"}
+        except:
+            return {"answer": "I'm sorry, I couldn't process that question.", "model_source": "fallback"}
 
 # Global instances
 groq_service = GroqService()
 risk_agent = RiskAnalysisAgent(groq_service)
-scoring_agent = AIScoringAgent(groq_service)
+policy_agent = PolicyAgent(groq_service)
+arbitration_agent = ArbitrationAgent(groq_service)
 decision_agent = LendingDecisionAgent(groq_service)
 chat_agent = ChatAgent(groq_service)

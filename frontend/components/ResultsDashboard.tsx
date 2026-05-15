@@ -64,7 +64,7 @@ const ResultsDashboard = ({ data }: { data: PredictionResponse }) => {
               AI Refined Score
             </div>
             <div className="text-5xl font-black text-white tracking-tighter mb-6">
-              {(risk_analysis.final_ai_score ?? risk_analysis.risk_score).toFixed(1)}
+              {(risk_analysis.final_ai_score ?? risk_analysis.ml_risk_score).toFixed(1)}
               <span className="text-xl font-normal text-white/30">/100</span>
             </div>
 
@@ -151,26 +151,66 @@ const ResultsDashboard = ({ data }: { data: PredictionResponse }) => {
         </div>
 
 
-        {/* AI Synthesis Reasoning */}
-        {risk_analysis.ai_score_reasoning && (
-          <motion.div 
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            className="glass p-8 rounded-[2rem] border border-primary/20 bg-primary/5 w-full"
-          >
-            <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <Bot className="w-5 h-5 text-primary" />
-              AI Score Synthesis
-            </h3>
-            <p className="text-sm text-foreground/80 leading-relaxed italic">
-              "{risk_analysis.ai_score_reasoning}"
-            </p>
-            <div className="mt-4 flex items-center gap-2">
-              <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Adjusted Score:</div>
-              <div className="text-sm font-black text-primary">{(risk_analysis.final_ai_score ?? risk_analysis.risk_score).toFixed(1)} / 100</div>
-            </div>
-          </motion.div>
-        )}
+        {/* Governance & Arbitration Section */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full">
+           {/* Confidence Meter */}
+           <div className="glass p-8 rounded-[2rem] border border-primary/20 bg-primary/5 flex flex-col justify-between">
+              <div>
+                <h4 className="text-sm font-black text-primary uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4" />
+                  Confidence Level
+                </h4>
+                <div className="flex items-end gap-3 mb-4">
+                  <div className="text-4xl font-black">{(risk_analysis.prediction_confidence * 100).toFixed(0)}%</div>
+                  <div className={cn(
+                    "text-xs font-bold mb-1.5 px-2 py-0.5 rounded uppercase tracking-widest",
+                    risk_analysis.prediction_confidence > 0.8 ? "text-green-400 bg-green-400/10" : "text-yellow-400 bg-yellow-400/10"
+                  )}>
+                    {risk_analysis.prediction_confidence > 0.8 ? "Reliable" : "Caution"}
+                  </div>
+                </div>
+                <div className="w-full bg-white/10 h-2 rounded-full overflow-hidden mb-2">
+                  <motion.div 
+                    initial={{ width: 0 }}
+                    animate={{ width: `${risk_analysis.prediction_confidence * 100}%` }}
+                    className={cn(
+                      "h-full rounded-full",
+                      risk_analysis.prediction_confidence > 0.8 ? "bg-green-500" : "bg-yellow-500"
+                    )}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground italic leading-relaxed">
+                Confidence calculated via model variance and feature stability metrics.
+              </p>
+           </div>
+
+           {/* Arbitration Layer */}
+           <div className="glass p-8 rounded-[2rem] border border-white/10 bg-white/[0.02]">
+              <h4 className="text-sm font-black text-white uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                <Scale className="w-4 h-4 text-white/60" />
+                Arbitration Summary
+              </h4>
+              <p className="text-sm text-foreground/70 leading-relaxed mb-6 font-medium">
+                {risk_analysis.arbitration_summary || "ML baseline prediction upheld by arbitration agent."}
+              </p>
+              <div className="flex items-center gap-6">
+                <div>
+                   <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">ML Score</div>
+                   <div className="text-sm font-bold text-white/40">{risk_analysis.ml_risk_score.toFixed(1)}</div>
+                </div>
+                <div className="w-px h-8 bg-white/10" />
+                <div>
+                   <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">Policy Risk</div>
+                   <div className="text-sm font-bold text-white/40">{risk_analysis.policy_risk_score.toFixed(1)}</div>
+                </div>
+                <div className="ml-auto">
+                   <div className="text-[10px] font-bold text-primary uppercase tracking-widest mb-1">Final Index</div>
+                   <div className="text-sm font-black text-primary">{risk_analysis.final_ai_score.toFixed(1)}</div>
+                </div>
+              </div>
+           </div>
+        </div>
       </div>
     </div>
   );

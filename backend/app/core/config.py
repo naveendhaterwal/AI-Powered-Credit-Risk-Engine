@@ -46,8 +46,8 @@ class Settings(BaseSettings):
     QDRANT_COLLECTION: str = "lending_policies"
     
     # ML Model Paths
-    ML_MODEL_PATH: str = "./models/logistic_model.pkl"
-    FEATURE_COLUMNS_PATH: str = "./models/feature_columns.pkl"
+    ML_MODEL_PATH: str = "./models/logistic_pipeline.pkl"
+    FEATURE_COLUMNS_PATH: str = "./models/feature_metadata.json"
 
     # Runtime behavior
     # When enabled, backend will fail requests instead of returning deterministic/mock fallback outputs.
