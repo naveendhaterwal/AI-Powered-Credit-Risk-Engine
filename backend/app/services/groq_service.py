@@ -266,8 +266,14 @@ class LendingDecisionAgent:
     def decide(
         self,
         model_scores: dict,
-        ensemble_score: float,
+        ml_risk_level: str,
+        ml_risk_score: float,
         disagreement_flag: str,
+        prediction_confidence: float,
+        fallback_level_used: int,
+        ensemble_health: str,
+        override_triggered: bool,
+        critical_flags: list,
         policy_matches: list,
         borrower_data: dict
     ) -> dict:
@@ -279,19 +285,29 @@ class LendingDecisionAgent:
         
         system_prompt = """You are a lending decision expert.
 Make clear, justifiable lending decisions based on the ensemble model scores, risk profile, and policy matches.
+If a deterministic override was triggered (`override_triggered=True`), you MUST honor the hard-coded critical flags and explain why the rule engine intervened.
+If the ML ensemble health is degraded or critical, you MUST acknowledge the model failure and adjust your recommendation conservatively.
+If multiple models fail or prediction confidence is low (< 0.6), you MUST recommend "Manual Review" or "Reject".
 If the models disagree (High Disagreement), you MUST explain the differences between the models.
 You MUST justify your final recommendation using both the policy rules and the ML scores.
 Format your response as a flat JSON object with these EXACT keys:
 - "recommendation": (String: "Approve", "Approve with conditions", "Manual Review", or "Reject")
-- "reasoning": (String, detailed explanation of the differences between models (if any) and justification for the final recommendation)
+- "reasoning": (String, detailed explanation addressing model health, score differences, and justification for the final recommendation)
 
 Do not nest these keys inside another object."""
         
         user_prompt = f"""
 Make a lending decision for:
-Ensemble Risk Score: {ensemble_score}
+Ensemble Risk Score: {ml_risk_score} ({ml_risk_level})
+Ensemble Health: {ensemble_health}
+Prediction Confidence: {prediction_confidence}
+Fallback Level Used: {fallback_level_used}
 Model Disagreement Flag: {disagreement_flag}
-Individual Model Scores: {json.dumps(model_scores, indent=2)}
+Individual Model Scores & Status: {json.dumps(model_scores, indent=2)}
+
+Deterministic Hard Rules:
+Override Triggered: {override_triggered}
+Critical Flags: {json.dumps(critical_flags)}
 
 Borrower Profile:
 - FOIR: {borrower_data.get('foir')}
@@ -404,6 +420,11 @@ class AIScoringAgent:
         self, 
         ml_score: float, 
         ml_level: str,
+        prediction_confidence: float,
+        fallback_level_used: int,
+        ensemble_health: str,
+        override_triggered: bool,
+        critical_flags: list,
         risk_analysis: dict,
         policy_matches: list,
         borrower_data: dict,
@@ -421,22 +442,33 @@ You must take the baseline Machine Learning (ML) score and refine it using:
 1. Company lending policies (retrieved as chunks).
 2. Qualitative strengths and weaknesses.
 3. Financial ratios (FOIR, DTI).
+4. System Health (Ensemble Health, Confidence, Fallback Level).
 
-The ML score is a mathematical baseline, but your AI score is the final human-like judgment that considers policy nuances.
+The ML score is a mathematical baseline, but your AI score is the final human-like judgment that considers policy nuances and system reliability.
 
-CRITICAL: If there are policy violations (e.g., FOIR > 50% for salaried), you MUST increase the risk score significantly (at least 60-70 or higher), even if the ML baseline is low. Never return 0.0 if there are active weaknesses or policy failures.
+CRITICAL: If a deterministic override was triggered by the hard rule engine, you MUST respect it and increase the score appropriately.
+CRITICAL: If there are policy violations (e.g., FOIR > 50% for salaried), you MUST increase the risk score significantly (at least 60-70 or higher).
+CRITICAL: If the ML ensemble health is degraded or failed, or confidence is low, you MUST adjust the score conservatively (higher risk) to account for model unreliability. Never return a low score if the system is failing.
 
 Format your response as a flat JSON object with these EXACT keys:
 - "final_score": (Float between 0 and 100, where 0 is safest and 100 is riskiest)
-- "reasoning": (String, detailed explanation of how the ML score was adjusted based on company policy and borrower profile)
+- "reasoning": (String, detailed explanation of how the ML score was adjusted based on company policy, borrower profile, and system health)
 
 Do not nest these keys."""
 
         user_prompt = f"""
 ML Consensus Breakdown:
-{json.dumps(model_scores or {"baseline_model": ml_score}, indent=2)}
+{json.dumps(model_scores or {{"baseline_model": ml_score}}, indent=2)}
 
 Ensemble Baseline Score: {ml_score} ({ml_level})
+Ensemble Health: {ensemble_health}
+Prediction Confidence: {prediction_confidence}
+Fallback Level Used: {fallback_level_used}
+
+Deterministic Hard Rules:
+Override Triggered: {override_triggered}
+Critical Flags: {json.dumps(critical_flags)}
+
 Positive strengths: {json.dumps(risk_analysis.get('positive_factors', []))}
 Negative weaknesses: {json.dumps(risk_analysis.get('top_risk_factors', []))}
 
@@ -447,8 +479,7 @@ Borrower Ratios:
 - FOIR: {borrower_data.get('foir')}
 - DTI: {borrower_data.get('dti')}
 
-Calculated final risk score based on the above context. If models disagree (e.g., Logistic Regression says Low but Random Forest says High), explain your reasoning for the chosen final score in the 'reasoning' field.
-"""
+Calculate final risk score based on the above context. Explain your reasoning for the chosen final score in the 'reasoning' field, specifically addressing any model failures or confidence drops."""
 
         try:
             response = self.groq.call_llm(user_prompt, system_prompt, temperature=0.1)

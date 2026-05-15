@@ -18,7 +18,7 @@ from app.schemas.borrower import BorrowerInput, BorrowerProfile
 from app.schemas.response import RiskLevel
 from app.core.config import settings
 from app.services.ml_service import ml_service
-from app.services.groq_service import groq_service, risk_agent, decision_agent
+from app.services.groq_service import groq_service, risk_agent, decision_agent, scoring_agent
 from app.services.rag_service import rag_service
 from app.services.report_service import report_service
 
@@ -258,17 +258,21 @@ def node_ml_prediction(state: WorkflowState) -> WorkflowState:
         
         # Store in state
         state.ml_risk_level = prediction_result.get("risk_level")
-        state.ml_risk_score = prediction_result.get("ensemble_score")
+        state.ml_risk_score = prediction_result.get("ml_ensemble_score", 0.0) * 100
         state.disagreement_flag = prediction_result.get("disagreement_flag")
-        state.ml_model_scores = {
-            "logistic": prediction_result.get("logistic"),
-            "random_forest": prediction_result.get("random_forest"),
-            "gradient_boost": prediction_result.get("gradient_boost")
-        }
+        state.ml_model_scores = prediction_result.get("models", {})
+        
+        # New robust architecture telemetry
+        state.prediction_confidence = prediction_result.get("prediction_confidence", 0.95)
+        state.fallback_level_used = prediction_result.get("fallback_level_used", 1)
+        state.ensemble_health = prediction_result.get("ensemble_health", "healthy")
+        state.override_triggered = prediction_result.get("override_triggered", False)
+        state.critical_flags = prediction_result.get("critical_flags", [])
         
         logger.info(f"   Risk Level: {state.ml_risk_level}")
         logger.info(f"   Risk Score: {state.ml_risk_score}")
         logger.info(f"   Disagreement: {state.disagreement_flag}")
+        logger.info(f"   Ensemble Health: {state.ensemble_health} (Fallback Level: {state.fallback_level_used})")
         
         state.step_completed = "ml_prediction"
         logger.info("✓ ML prediction complete")
@@ -516,7 +520,12 @@ def node_ai_scoring(state: WorkflowState) -> WorkflowState:
         
         result, interaction = scoring_agent.evaluate(
             ml_score=state.ml_risk_score,
-            ml_level=state.ml_risk_level.value if state.ml_risk_level else "Unknown",
+            ml_level=state.ml_risk_level.value if hasattr(state.ml_risk_level, 'value') else str(state.ml_risk_level),
+            prediction_confidence=state.prediction_confidence,
+            fallback_level_used=state.fallback_level_used,
+            ensemble_health=state.ensemble_health,
+            override_triggered=state.override_triggered,
+            critical_flags=state.critical_flags,
             risk_analysis=state.risk_analysis,
             policy_matches=state.policy_matches,
             borrower_data=borrower_data,
@@ -612,8 +621,14 @@ def node_lending_decision(state: WorkflowState) -> WorkflowState:
         # Call decision agent
         decision, interaction = decision_agent.decide(
             model_scores=state.ml_model_scores,
-            ensemble_score=state.ml_risk_score,
+            ml_risk_level=state.ml_risk_level.value if hasattr(state.ml_risk_level, 'value') else str(state.ml_risk_level),
+            ml_risk_score=state.ml_risk_score,
             disagreement_flag=state.disagreement_flag,
+            prediction_confidence=state.prediction_confidence,
+            fallback_level_used=state.fallback_level_used,
+            ensemble_health=state.ensemble_health,
+            override_triggered=state.override_triggered,
+            critical_flags=state.critical_flags,
             policy_matches=state.policy_matches,
             borrower_data=borrower_data
         )
@@ -708,6 +723,7 @@ def build_workflow():
     workflow.add_node("ml_prediction", node_ml_prediction)
     workflow.add_node("risk_analysis", node_risk_analysis)
     workflow.add_node("policy_retrieval", node_policy_retrieval)
+    workflow.add_node("ai_scoring", node_ai_scoring)
     workflow.add_node("decision_agent", node_lending_decision)
     workflow.add_node("report_agent", node_report_agent)
     
@@ -718,7 +734,8 @@ def build_workflow():
     workflow.add_edge("input_processing", "ml_prediction")
     workflow.add_edge("ml_prediction", "risk_analysis")
     workflow.add_edge("risk_analysis", "policy_retrieval")
-    workflow.add_edge("policy_retrieval", "decision_agent")
+    workflow.add_edge("policy_retrieval", "ai_scoring")
+    workflow.add_edge("ai_scoring", "decision_agent")
     workflow.add_edge("decision_agent", "report_agent")
     workflow.add_edge("report_agent", END)
     

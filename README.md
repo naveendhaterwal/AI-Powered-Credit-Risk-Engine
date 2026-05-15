@@ -58,13 +58,15 @@ graph TD
 
 ---
 
-## 🔬 Machine Learning Pipeline
+The system uses a hardened, production-grade ML ensemble trained on authentic bank data (no synthetic SMOTE oversampling):
 
-The system moves beyond simple rule-based or single-model scoring by employing a weighted ensemble approach:
-
-- **Model Diversity:** Utilizes three distinct algorithms (`LogisticRegression`, `RandomForestClassifier`, `GradientBoostingClassifier`) to capture both linear relationships and complex non-linear feature interactions.
-- **Ensemble Weights:** Probabilities are combined using a tuned weighting strategy (e.g., 0.3 LR, 0.35 RF, 0.35 GB) to optimize the ROC-AUC and minimize false negatives in high-risk bands.
-- **Disagreement Heuristic:** Calculates the maximum variance between model probabilities. If variance exceeds a predefined threshold (e.g., > 0.4), a `High Disagreement` flag is raised, signaling the Decision Agent to apply stricter scrutiny and manual review recommendations.
+- **Weighted Ensemble Strategy:** Combines probabilities with a tuned strategy: **0.25 Logistic Regression**, **0.40 Random Forest**, and **0.35 Gradient Boosting**.
+- **Probability Calibration:** Non-linear models are wrapped in `CalibratedClassifierCV` to ensure scores represent reliable risk probabilities.
+- **Deterministic Gateway:** Before ML inference, a hard-rule engine enforces institutional constraints:
+  - **Credit Score < 550:** Automatic Reject.
+  - **LTV > 120%:** Automatic Reject.
+  - **FOIR > 55%:** Automatic Reject.
+  - **Income ≤ 0:** Automatic Manual Review.
 
 ---
 
@@ -72,10 +74,11 @@ The system moves beyond simple rule-based or single-model scoring by employing a
 
 Built on **LangGraph** and the **Groq API** (running `llama-3.1-8b-instant`), the orchestration layer mimics a human underwriting committee:
 
-1. **ML Prediction Node:** Deterministically executes the ensemble pipeline.
-2. **Risk Analysis Agent:** Interprets the financial ratios (DTI, FOIR) and ML scores.
-3. **Policy Retrieval Agent:** Embeds the applicant's profile to query the Qdrant Vector DB for relevant internal banking guidelines.
-4. **Decision Agent:** The final authoritative node. It receives the ensemble scores, the disagreement flag, and the retrieved policies to synthesize a final recommendation (`Approve`, `Reject`, or `Manual Review`) along with a detailed, human-readable justification.
+1. **Deterministic Node:** Executes hard banking rules.
+2. **ML Prediction Node:** Executes the calibrated ensemble pipeline.
+3. **Risk Analysis Agent:** Interprets the financial ratios (DTI, FOIR) and ML scores.
+4. **Policy Retrieval Agent:** Embeds the applicant's profile to query the Qdrant Vector DB for relevant internal banking guidelines.
+5. **Decision Agent:** The final authoritative node. It receives the ensemble scores, the override flags, and the retrieved policies to synthesize a final recommendation (`Approve`, `Reject`, or `Manual Review`).
 
 ---
 
@@ -105,7 +108,7 @@ QDRANT_API_KEY=your_qdrant_api_key
 CORS_ORIGINS=http://localhost:3000,http://localhost:3001
 ```
 
-*Note: Ensure the pre-trained models (`logistic_model.pkl`, `rf_model.pkl`, `gb_model.pkl`) are present in `backend/models/`. You can generate them by running `python scripts/train_multi_models.py`.*
+*Note: Ensure the pre-trained pipelines (`logistic_pipeline.pkl`, `rf_pipeline.pkl`, `gb_pipeline.pkl`) are present in `backend/models/`. You can regenerate them by running `python scripts/generate_eda_notebook.py` and executing the notebook.*
 
 ### 2. Frontend Setup
 

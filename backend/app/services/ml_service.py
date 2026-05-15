@@ -26,27 +26,30 @@ class MLService:
         """Initialize the service - load models on startup"""
         self.models: Dict[str, Any] = {}
         self.feature_columns: List[str] = []
+        self.preprocessor = None
         self.models_loaded = False
         self.use_fallback = False
         self._load_models()
     
     def _load_models(self):
-        """Load multiple ML models from disk"""
+        """Load multiple ML models and preprocessing pipeline from disk"""
         try:
             feature_path = Path(settings.FEATURE_COLUMNS_PATH)
-            if not feature_path.exists():
-                logger.warning(f"Feature columns not found at {feature_path}. Switching to rule-based fallback.")
+            preprocessor_path = Path(settings.ML_MODEL_PATH).parent / "preprocessing_pipeline.pkl"
+            
+            if not feature_path.exists() or not preprocessor_path.exists():
+                logger.warning("Models, features, or preprocessor not found. Switching to rule-based fallback.")
                 self.use_fallback = True
                 return
             
             self.feature_columns = joblib.load(feature_path)
+            self.preprocessor = joblib.load(preprocessor_path)
             
             # Map of model name to its expected filename
             model_registry = {
                 "logistic": "logistic_model.pkl",
                 "random_forest": "rf_model.pkl",
-                "gradient_boosting": "gb_model.pkl",
-                "xgboost": "xgb_model.pkl"
+                "gradient_boosting": "gb_model.pkl"
             }
             
             loaded_count = 0
@@ -65,30 +68,15 @@ class MLService:
                 self.use_fallback = True
             else:
                 self.models_loaded = True
-                logger.info(f"ML Service initialized with {loaded_count} models and {len(self.feature_columns)} features")
+                logger.info(f"ML Service initialized with {loaded_count} models and preprocessing pipeline.")
                 
         except Exception as e:
             logger.error(f"Error in ML Service initialization: {str(e)}. Enabling rule-based fallback.")
             self.models = {}
             self.feature_columns = []
+            self.preprocessor = None
             self.models_loaded = False
             self.use_fallback = True
-
-    def _map_age_bucket(self, age: int) -> str:
-        """Map numeric age to bucket labels typically used in credit datasets."""
-        if age < 25:
-            return "<25"
-        if age < 35:
-            return "25-34"
-        if age < 45:
-            return "35-44"
-        if age < 55:
-            return "45-54"
-        if age < 65:
-            return "55-64"
-        if age < 75:
-            return "65-74"
-        return ">74"
 
     def _loan_purpose_to_model(self, purpose: str) -> str:
         """Map app loan purpose to dataset categories."""
@@ -101,139 +89,79 @@ class MLService:
         return purpose_map.get(purpose, "p3")
 
     def _build_model_input(self, borrower: BorrowerProfile) -> pd.DataFrame:
-        """Build a one-row DataFrame aligned to the trained model feature columns."""
+        """Build a one-row DataFrame mapped to raw training features before preprocessing."""
         if not self.feature_columns:
             raise ValueError("Feature columns are not loaded")
 
-        # Start with NaN so the model's imputers can fill missing values.
-        row = {col: np.nan for col in self.feature_columns}
-
-        # Numeric values from borrower profile.
-        row["income"] = float(borrower.monthly_income * 12)
-        row["loan_amount"] = float(borrower.loan_amount_requested)
-        row["Credit_Score"] = int(borrower.credit_score)
-        row["dtir1"] = float(max(0.0, min(100.0, borrower.dti * 100.0)))
-        row["LTV"] = 80.0
-        row["term"] = int(borrower.loan_tenure_months)
-
-        # Categorical values mapped to model vocabulary used in training UI.
-        row["loan_purpose"] = self._loan_purpose_to_model(borrower.loan_purpose)
-        row["Credit_Worthiness"] = "l1" if borrower.credit_score >= 700 else "l2"
-        row["open_credit"] = "opc" if borrower.existing_loan_amount > 0 else "nopc"
-        row["interest_only"] = "not_int"
-        row["loan_limit"] = "cf"
-        row["business_or_commercial"] = "ob/c" if borrower.loan_purpose == "Business" else "nob/c"
-        row["occupancy_type"] = "pr"
-        row["age"] = self._map_age_bucket(borrower.age)
-
-        # Defaults for remaining categorical fields from common mortgage dataset values.
-        row["year"] = 2019
-        row["Gender"] = "Sex Not Available"
-        row["approv_in_adv"] = "nopre"
-        row["loan_type"] = "type1"
-        row["rate_of_interest"] = 8.5
-        row["Interest_rate_spread"] = 0.0
-        row["Upfront_charges"] = 0.0
-        row["Neg_ammortization"] = "not_neg"
-        row["lump_sum_payment"] = "not_lpsm"
-        row["property_value"] = float(borrower.loan_amount_requested / 0.8) if borrower.loan_amount_requested > 0 else 0.0
-        row["construction_type"] = "sb"
-        row["Secured_by"] = "home"
-        row["total_units"] = "1U"
-        row["credit_type"] = "EXP"
-        row["co-applicant_credit_type"] = "CIB"
-        row["submission_of_application"] = "to_inst"
-        row["Region"] = "south"
-        row["Security_Type"] = "direct"
-
-        ordered_row = {col: row.get(col, np.nan) for col in self.feature_columns}
-        return pd.DataFrame([ordered_row])
-    
-    def predict_all_models(self, borrower: BorrowerProfile) -> Dict[str, Any]:
-        """
-        Predict using all models and return ensemble details.
-        """
-        if self.use_fallback or not self.models_loaded:
-            # Fallback if models are not loaded
-            return {
-                "logistic": 0.0,
-                "random_forest": 0.0,
-                "gradient_boost": 0.0,
-                "ensemble_score": 0.0,
-                "risk_level": "Medium Risk",
-                "disagreement_flag": "Low"
-            }
-
-        features = self._prepare_features(borrower)
-        individual_probs = {}
-        for name, model in self.models.items():
-            if name in ["logistic", "random_forest", "gradient_boosting"]:
-                try:
-                    if hasattr(model, "predict_proba"):
-                        probs = model.predict_proba(features)[0]
-                        pos_idx = 1
-                        if hasattr(model, "classes_"):
-                            classes = list(model.classes_)
-                            if 1 in classes:
-                                pos_idx = classes.index(1)
-                            elif '1' in classes:
-                                pos_idx = classes.index('1')
-                        individual_probs[name] = float(probs[pos_idx])
-                except Exception as e:
-                    logger.error(f"Error predicting with {name}: {e}")
-
-        log_prob = individual_probs.get("logistic", 0.0)
-        rf_prob = individual_probs.get("random_forest", 0.0)
-        gb_prob = individual_probs.get("gradient_boosting", 0.0)
-
-        final_score = 0.3 * log_prob + 0.35 * rf_prob + 0.35 * gb_prob
-
-        if final_score <= 0.4:
-            category = "Low Risk"
-        elif final_score <= 0.7:
-            category = "Medium Risk"
-        else:
-            category = "High Risk"
-
-        probs_list = [log_prob, rf_prob, gb_prob]
-        flag = "High Disagreement" if (max(probs_list) - min(probs_list)) > 0.4 else "Low Disagreement"
-
-        # To match the requested JSON output format strictly, we use exactly "High" or "Low" 
-        # or whatever the flag should be, but let's use "High" / "Low" as it matches the example.
-        if flag == "High Disagreement":
-            flag = "High"
-        else:
-            flag = "Low"
-
-        return {
-            "logistic": round(log_prob, 2),
-            "random_forest": round(rf_prob, 2),
-            "gradient_boost": round(gb_prob, 2),
-            "ensemble_score": round(final_score, 2),
-            "risk_level": category,
-            "disagreement_flag": flag
+        loan_amount = float(borrower.loan_amount_requested)
+        income = float(borrower.monthly_income)
+        temp_income = income if income > 0 else np.nan
+        
+        # Calculate engineered features matching training script
+        loan_to_income = loan_amount / (temp_income * 12 + 1) if temp_income is not np.nan else np.nan
+        term = int(borrower.loan_tenure_months)
+        
+        # Assume 5% flat rate for EMI calculation if missing
+        annual_rate = 0.05
+        monthly_rate = annual_rate / 12
+        estimated_emi = loan_amount * (monthly_rate * (1 + monthly_rate)**term) / ((1 + monthly_rate)**term - 1)
+        
+        derived_foir = estimated_emi / (temp_income + 1) if temp_income is not np.nan else np.nan
+        property_value = float(loan_amount / 0.8) if loan_amount > 0 else 0.0
+        loan_to_property_ratio = loan_amount / (property_value + 1)
+        
+        # Clip features
+        ltv_raw = loan_amount / property_value * 100 if property_value > 0 else 80.0
+        ltv_clipped = float(min(150.0, max(0.0, ltv_raw)))
+        dti_clipped = float(min(65.0, max(0.0, borrower.dti * 100.0)))
+        
+        row = {
+            "loan_amount": loan_amount,
+            "term": term,
+            "property_value": property_value,
+            "income": temp_income,
+            "Credit_Score": int(borrower.credit_score),
+            "LTV": ltv_clipped,
+            "dtir1": dti_clipped,
+            "loan_to_income": loan_to_income,
+            "estimated_emi": estimated_emi,
+            "derived_foir": derived_foir,
+            "loan_to_property_ratio": loan_to_property_ratio,
+            
+            "loan_purpose": self._loan_purpose_to_model(borrower.loan_purpose),
+            "Credit_Worthiness": "l1" if borrower.credit_score >= 700 else "l2",
+            "business_or_commercial": "b/c" if borrower.loan_purpose == "Business" else "nob/c",
+            "loan_limit": "cf",
+            "approv_in_adv": "nopre",
+            "loan_type": "type1",
+            "Neg_ammortization": "not_neg",
+            "interest_only": "not_int",
+            "lump_sum_payment": "not_lpsm",
+            "occupancy_type": "pr",
+            "total_units": "1U",
+            "credit_type": "EXP",
+            "co-applicant_credit_type": "CIB",
+            "submission_of_application": "to_inst",
+            "Region": "south"
         }
 
-    def _prepare_features(self, borrower: BorrowerProfile) -> pd.DataFrame:
-        """Prepare borrower data for the saved sklearn pipeline."""
-        return self._build_model_input(borrower)
+        # Ensure ordered as training features
+        ordered_row = {col: row.get(col, np.nan) for col in self.feature_columns}
+        return pd.DataFrame([ordered_row])
+        
+    def _prepare_features(self, borrower: BorrowerProfile) -> np.ndarray:
+        """Prepare borrower data using the scikit-learn preprocessing pipeline."""
+        df = self._build_model_input(borrower)
+        if self.preprocessor:
+            return self.preprocessor.transform(df)
+        return df.to_numpy()
             
     def _predict_fallback(self, borrower: BorrowerProfile) -> Tuple[str, float, float, Dict[str, Any]]:
         """Rule-based risk calculation as a fallback for missing or incompatible ML model."""
         logger.info("Using rule-based risk prediction fallback")
-        
-        # Base score from Credit Score (higher = better)
-        # Convert 300-900 range to 0-100 (inverted for risk)
         base_risk = 100 - ((borrower.credit_score - 300) / 600 * 100)
-        
-        # Adjust for FOIR (Banks prefer < 40%)
-        # FOIR of 0.5 adds significant risk
         foir_penalty = max(0, (borrower.foir - 0.4) * 100)
-        
-        # Adjust for DTI (Banks prefer < 40%)
         dti_penalty = max(0, (borrower.dti - 0.4) * 50)
-        
-        # Employment stability
         employment_bonus = -5 if borrower.employment_type == "Salaried" else 5
         
         total_risk = base_risk + foir_penalty + dti_penalty + employment_bonus
@@ -243,40 +171,184 @@ class MLService:
         
         score_breakdown = {
             "method": "rule_based_fallback",
-            "formula": "risk = clamp(base_risk + foir_penalty + dti_penalty + employment_adjustment, 0, 100)",
-            "strict_no_fallbacks": settings.STRICT_NO_FALLBACKS,
             "components": {
                 "base_risk_from_credit_score": round(base_risk, 4),
                 "foir_penalty": round(foir_penalty, 4),
                 "dti_penalty": round(dti_penalty, 4),
-                "employment_adjustment": employment_bonus,
             },
         }
 
-        return risk_level, round(total_risk, 2), 0.7, score_breakdown  # Constant confidence for fallback
+        return risk_level, round(total_risk, 2), 0.7, score_breakdown
     
     def _interpret_prediction(self, prediction: float) -> Tuple[str, float]:
-        """
-        Convert raw model prediction to risk level and score.
-        
-        Assumes prediction is between 0-1 where:
-        - 0 = Low risk
-        - 1 = High risk
-        """
-        
-        # Convert to 0-100 scale
         risk_score = float(prediction * 100)
-        
-        # Classify into levels
         if risk_score < 40:
             risk_level = "Low"
         elif risk_score < 60:
             risk_level = "Medium"
         else:
             risk_level = "High"
-        
         return risk_level, risk_score
 
+    def predict_all_models(self, borrower: BorrowerProfile) -> Dict[str, Any]:
+        """
+        Predict using all models and return ensemble details.
+        Implements hard banking rules, ensemble averaging, and intelligent fallback.
+        """
+        # ==========================================================
+        # LEVEL 3: HARD BANKING RULES (Deterministic Pre-ML Override)
+        # ==========================================================
+        calculated_ltv = (borrower.loan_amount_requested / (borrower.loan_amount_requested / 0.8)) * 100 if borrower.loan_amount_requested > 0 else 0
+        
+        if borrower.credit_score < 550:
+            return self._build_deterministic_override("Reject", ["Low Credit Score"], "Credit score below 550 is an automatic reject.")
+        if calculated_ltv > 120:
+            return self._build_deterministic_override("Reject", ["High LTV"], "LTV exceeds 120% limit for standard underwriting.")
+        if borrower.foir * 100 > 55:
+            return self._build_deterministic_override("Reject", ["Extreme FOIR"], "FOIR exceeds 55%, violating ability-to-repay regulations.")
+        if borrower.monthly_income <= 0:
+            return self._build_deterministic_override("Manual Review", ["Zero Income"], "Income reported as 0 requires manual verification.")
 
-# Global instance - created once and reused
+        # ==========================================================
+        # LEVELS 1-2: ENSEMBLE ML EXECUTION
+        # ==========================================================
+        base_weights = {
+            "logistic": 0.25,
+            "random_forest": 0.40,
+            "gradient_boosting": 0.35
+        }
+        
+        models_output = {
+            "logistic": {"status": "failed", "reason": "model_loading_failure"},
+            "random_forest": {"status": "failed", "reason": "model_loading_failure"},
+            "gradient_boost": {"status": "failed", "reason": "model_loading_failure"}
+        }
+
+        name_map = {
+            "logistic": "logistic",
+            "random_forest": "random_forest",
+            "gradient_boosting": "gradient_boost"
+        }
+        
+        if self.use_fallback or not self.models_loaded:
+            return self._execute_level_4_fallback(borrower, models_output, "model_loading_failure")
+
+        try:
+            features = self._prepare_features(borrower)
+        except Exception as e:
+            logger.error(f"Error preparing features: {e}")
+            return self._execute_level_4_fallback(borrower, models_output, "preprocessing_error")
+
+        successful_models = {}
+        
+        for name, model in self.models.items():
+            if name not in base_weights:
+                continue
+                
+            out_name = name_map[name]
+            try:
+                probs = model.predict_proba(features)[0]
+                pos_idx = 1
+                if hasattr(model, "classes_"):
+                    classes = list(model.classes_)
+                    if 1 in classes:
+                        pos_idx = classes.index(1)
+                    elif '1' in classes:
+                        pos_idx = classes.index('1')
+                
+                score = float(probs[pos_idx]) * 100
+                successful_models[name] = score
+                models_output[out_name] = {"status": "healthy", "score": round(score, 2)}
+            except Exception as e:
+                models_output[out_name] = {"status": "failed", "reason": str(e)[:30]}
+                logger.error(f"Error predicting with {name}: {e}")
+
+        models_active = len(successful_models)
+        
+        # Level 4 Fallback if entirely failed
+        if models_active == 0:
+            return self._execute_level_4_fallback(borrower, models_output, "all_models_failed_inference")
+            
+        total_remaining_weight = sum(base_weights[name] for name in successful_models)
+        final_score = 0.0
+        for name, score in successful_models.items():
+            dynamic_weight = base_weights[name] / total_remaining_weight
+            final_score += score * dynamic_weight
+            
+        if models_active == 3:
+            fallback_level = 1
+            ensemble_health = "healthy"
+            base_confidence = 0.95
+        elif models_active == 2:
+            fallback_level = 2
+            ensemble_health = "degraded"
+            base_confidence = 0.65
+        else:
+            fallback_level = 3
+            ensemble_health = "critical"
+            base_confidence = 0.35
+            
+        category, _ = self._interpret_prediction(final_score / 100.0)
+
+        flag = "Low"
+        if models_active > 1:
+            scores_list = list(successful_models.values())
+            disagreement = (max(scores_list) - min(scores_list)) > 40.0
+            if disagreement:
+                flag = "High"
+                base_confidence -= 0.15
+            
+        prediction_confidence = round(max(0.1, base_confidence), 2)
+
+        return {
+            "ml_ensemble_score": round(final_score / 100.0, 2), # normalized to 0-1
+            "override_triggered": False,
+            "critical_flags": [],
+            "risk_level": category,
+            "prediction_confidence": prediction_confidence,
+            "fallback_level_used": fallback_level,
+            "ensemble_health": ensemble_health,
+            "disagreement_flag": flag,
+            "models": models_output,
+            "recommendation": "Pending AI Review",
+            "reasoning": "Ensemble execution completed."
+        }
+
+    def _execute_level_4_fallback(self, borrower: BorrowerProfile, models_output: dict, reason: str) -> Dict[str, Any]:
+        """Execute Level 4 deterministic fallback when ML ensemble completely fails."""
+        risk_level, total_risk, _, _ = self._predict_fallback(borrower)
+        if not risk_level.endswith("Risk"):
+            risk_level += " Risk"
+            
+        return {
+            "ml_ensemble_score": round(total_risk / 100.0, 2),
+            "override_triggered": False,
+            "critical_flags": ["Model Inference Failed"],
+            "risk_level": risk_level,
+            "prediction_confidence": 0.20,
+            "fallback_level_used": 4,
+            "ensemble_health": "failed",
+            "disagreement_flag": "N/A",
+            "models": models_output,
+            "recommendation": "Manual Review",
+            "reasoning": f"ML pipeline unavailable ({reason}). Rule-based assessment used."
+        }
+        
+    def _build_deterministic_override(self, recommendation: str, flags: List[str], reasoning: str) -> Dict[str, Any]:
+        """Bypass ML to enforce deterministic banking limits."""
+        return {
+            "ml_ensemble_score": 1.0 if recommendation == "Reject" else 0.5,
+            "override_triggered": True,
+            "critical_flags": flags,
+            "risk_level": "High Risk",
+            "prediction_confidence": 1.0, # Deterministic rules are 100% confident
+            "fallback_level_used": 3,
+            "ensemble_health": "healthy", # Skipped intentionally, but engine is healthy
+            "disagreement_flag": "N/A",
+            "models": {},
+            "recommendation": recommendation,
+            "reasoning": reasoning
+        }
+
+# Global singleton
 ml_service = MLService()

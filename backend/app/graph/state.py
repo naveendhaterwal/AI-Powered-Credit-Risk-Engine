@@ -38,7 +38,12 @@ class WorkflowState:
     ml_risk_level: Optional[str] = None
     ml_risk_score: float = 0.0
     disagreement_flag: str = "Low"
-    ml_model_scores: Dict[str, float] = field(default_factory=dict)
+    ml_model_scores: Dict[str, Any] = field(default_factory=dict)
+    prediction_confidence: float = 0.95
+    fallback_level_used: int = 1
+    ensemble_health: str = "healthy"
+    override_triggered: bool = False
+    critical_flags: List[str] = field(default_factory=list)
     score_breakdown: Dict[str, Any] = field(default_factory=dict)
     
     # ========== RISK ANALYSIS AGENT OUTPUT ==========
@@ -99,6 +104,11 @@ class WorkflowState:
             "ml_risk_score": self.ml_risk_score,
             "disagreement_flag": self.disagreement_flag,
             "ml_model_scores": self.ml_model_scores,
+            "prediction_confidence": self.prediction_confidence,
+            "fallback_level_used": self.fallback_level_used,
+            "ensemble_health": self.ensemble_health,
+            "override_triggered": self.override_triggered,
+            "critical_flags": self.critical_flags,
             "score_breakdown": self.score_breakdown,
             "risk_analysis": self.risk_analysis,
             "policy_matches": self.policy_matches,

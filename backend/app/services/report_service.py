@@ -39,15 +39,18 @@ class ReportService:
 			for p in state.policy_matches
 		]
 
+		risk_val = state.final_risk_level or state.ml_risk_level or "Medium"
+		risk_str = risk_val.value if hasattr(risk_val, "value") else risk_val
+
 		report = {
 			"borrower_name": state.borrower_input.full_name if state.borrower_input else "Unknown",
 			"request_id": state.request_id,
 			"risk_analysis": {
-				"risk_level": (state.final_risk_level or state.ml_risk_level).value if (state.final_risk_level or state.ml_risk_level) else "Medium",
+				"risk_level": risk_str,
 				"risk_score": state.ml_risk_score,
 				"top_risk_factors": risk.get("top_risk_factors", []),
 				"positive_factors": risk.get("positive_factors", []),
-				"confidence_score": state.ml_confidence,
+				"confidence_score": risk.get("confidence_score", 0.7),
 				"final_ai_score": state.final_ai_score,
 				"ai_score_reasoning": state.ai_score_reasoning,
 			},

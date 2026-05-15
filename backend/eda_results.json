@@ -1,0 +1,530 @@
+{
+  "shape": [
+    148670,
+    34
+  ],
+  "columns": [
+    "ID",
+    "year",
+    "loan_limit",
+    "Gender",
+    "approv_in_adv",
+    "loan_type",
+    "loan_purpose",
+    "Credit_Worthiness",
+    "open_credit",
+    "business_or_commercial",
+    "loan_amount",
+    "rate_of_interest",
+    "Interest_rate_spread",
+    "Upfront_charges",
+    "term",
+    "Neg_ammortization",
+    "interest_only",
+    "lump_sum_payment",
+    "property_value",
+    "construction_type",
+    "occupancy_type",
+    "Secured_by",
+    "total_units",
+    "income",
+    "credit_type",
+    "Credit_Score",
+    "co-applicant_credit_type",
+    "age",
+    "submission_of_application",
+    "LTV",
+    "Region",
+    "Security_Type",
+    "Status",
+    "dtir1"
+  ],
+  "dtypes": {
+    "ID": "int64",
+    "year": "int64",
+    "loan_limit": "object",
+    "Gender": "object",
+    "approv_in_adv": "object",
+    "loan_type": "object",
+    "loan_purpose": "object",
+    "Credit_Worthiness": "object",
+    "open_credit": "object",
+    "business_or_commercial": "object",
+    "loan_amount": "int64",
+    "rate_of_interest": "float64",
+    "Interest_rate_spread": "float64",
+    "Upfront_charges": "float64",
+    "term": "float64",
+    "Neg_ammortization": "object",
+    "interest_only": "object",
+    "lump_sum_payment": "object",
+    "property_value": "float64",
+    "construction_type": "object",
+    "occupancy_type": "object",
+    "Secured_by": "object",
+    "total_units": "object",
+    "income": "float64",
+    "credit_type": "object",
+    "Credit_Score": "int64",
+    "co-applicant_credit_type": "object",
+    "age": "object",
+    "submission_of_application": "object",
+    "LTV": "float64",
+    "Region": "object",
+    "Security_Type": "object",
+    "Status": "int64",
+    "dtir1": "float64"
+  },
+  "memory_usage_mb": 173.8972988128662,
+  "duplicates": 0,
+  "missing": {
+    "loan_limit": {
+      "count": 3344,
+      "percentage": 2.2492769220421067
+    },
+    "approv_in_adv": {
+      "count": 908,
+      "percentage": 0.6107486379229166
+    },
+    "loan_purpose": {
+      "count": 134,
+      "percentage": 0.09013250823972557
+    },
+    "rate_of_interest": {
+      "count": 36439,
+      "percentage": 24.509988565278807
+    },
+    "Interest_rate_spread": {
+      "count": 36639,
+      "percentage": 24.64451469697989
+    },
+    "Upfront_charges": {
+      "count": 39642,
+      "percentage": 26.664424564471652
+    },
+    "term": {
+      "count": 41,
+      "percentage": 0.027577856998722002
+    },
+    "Neg_ammortization": {
+      "count": 121,
+      "percentage": 0.08138830967915517
+    },
+    "property_value": {
+      "count": 15098,
+      "percentage": 10.15537768211475
+    },
+    "income": {
+      "count": 9150,
+      "percentage": 6.154570525324544
+    },
+    "age": {
+      "count": 200,
+      "percentage": 0.13452613170108293
+    },
+    "submission_of_application": {
+      "count": 200,
+      "percentage": 0.13452613170108293
+    },
+    "LTV": {
+      "count": 15098,
+      "percentage": 10.15537768211475
+    },
+    "dtir1": {
+      "count": 24121,
+      "percentage": 16.224524113809107
+    }
+  },
+  "uniques": {
+    "ID": 148670,
+    "year": 1,
+    "loan_limit": 2,
+    "Gender": 4,
+    "approv_in_adv": 2,
+    "loan_type": 3,
+    "loan_purpose": 4,
+    "Credit_Worthiness": 2,
+    "open_credit": 2,
+    "business_or_commercial": 2,
+    "loan_amount": 211,
+    "rate_of_interest": 131,
+    "Interest_rate_spread": 22516,
+    "Upfront_charges": 58271,
+    "term": 26,
+    "Neg_ammortization": 2,
+    "interest_only": 2,
+    "lump_sum_payment": 2,
+    "property_value": 385,
+    "construction_type": 2,
+    "occupancy_type": 3,
+    "Secured_by": 2,
+    "total_units": 4,
+    "income": 1001,
+    "credit_type": 4,
+    "Credit_Score": 401,
+    "co-applicant_credit_type": 2,
+    "age": 7,
+    "submission_of_application": 2,
+    "LTV": 8484,
+    "Region": 4,
+    "Security_Type": 2,
+    "Status": 2,
+    "dtir1": 57
+  },
+  "target_column": "Status",
+  "target_distribution": {
+    "0": 112031,
+    "1": 36639
+  },
+  "describe": {
+    "ID": {
+      "count": 148670.0,
+      "mean": 99224.5,
+      "std": 42917.47659753542,
+      "min": 24890.0,
+      "25%": 62057.25,
+      "50%": 99224.5,
+      "75%": 136391.75,
+      "max": 173559.0
+    },
+    "year": {
+      "count": 148670.0,
+      "mean": 2019.0,
+      "std": 0.0,
+      "min": 2019.0,
+      "25%": 2019.0,
+      "50%": 2019.0,
+      "75%": 2019.0,
+      "max": 2019.0
+    },
+    "loan_amount": {
+      "count": 148670.0,
+      "mean": 331117.7439967714,
+      "std": 183909.3101270855,
+      "min": 16500.0,
+      "25%": 196500.0,
+      "50%": 296500.0,
+      "75%": 436500.0,
+      "max": 3576500.0
+    },
+    "rate_of_interest": {
+      "count": 112231.0,
+      "mean": 4.045475804367777,
+      "std": 0.5613911934670424,
+      "min": 0.0,
+      "25%": 3.625,
+      "50%": 3.99,
+      "75%": 4.375,
+      "max": 8.0
+    },
+    "Interest_rate_spread": {
+      "count": 112031.0,
+      "mean": 0.4416556604868295,
+      "std": 0.5130427357847288,
+      "min": -3.638,
+      "25%": 0.076,
+      "50%": 0.3904,
+      "75%": 0.7754,
+      "max": 3.357
+    },
+    "Upfront_charges": {
+      "count": 109028.0,
+      "mean": 3224.996126591334,
+      "std": 3251.1215097103263,
+      "min": 0.0,
+      "25%": 581.49,
+      "50%": 2596.45,
+      "75%": 4812.5,
+      "max": 60000.0
+    },
+    "term": {
+      "count": 148629.0,
+      "mean": 335.1365816899797,
+      "std": 58.409083508964336,
+      "min": 96.0,
+      "25%": 360.0,
+      "50%": 360.0,
+      "75%": 360.0,
+      "max": 360.0
+    },
+    "property_value": {
+      "count": 133572.0,
+      "mean": 497893.46569640347,
+      "std": 359935.31556194386,
+      "min": 8000.0,
+      "25%": 268000.0,
+      "50%": 418000.0,
+      "75%": 628000.0,
+      "max": 16508000.0
+    },
+    "income": {
+      "count": 139520.0,
+      "mean": 6957.338876146789,
+      "std": 6496.586382220254,
+      "min": 0.0,
+      "25%": 3720.0,
+      "50%": 5760.0,
+      "75%": 8520.0,
+      "max": 578580.0
+    },
+    "Credit_Score": {
+      "count": 148670.0,
+      "mean": 699.7891033833322,
+      "std": 115.87585660446858,
+      "min": 500.0,
+      "25%": 599.0,
+      "50%": 699.0,
+      "75%": 800.0,
+      "max": 900.0
+    },
+    "LTV": {
+      "count": 133572.0,
+      "mean": 72.74645733387138,
+      "std": 39.96760298303225,
+      "min": 0.967478198,
+      "25%": 60.47486034,
+      "50%": 75.13586957,
+      "75%": 86.18421053,
+      "max": 7831.25
+    },
+    "Status": {
+      "count": 148670.0,
+      "mean": 0.24644514696979888,
+      "std": 0.4309422068621314,
+      "min": 0.0,
+      "25%": 0.0,
+      "50%": 0.0,
+      "75%": 0.0,
+      "max": 1.0
+    },
+    "dtir1": {
+      "count": 124549.0,
+      "mean": 37.73293242017198,
+      "std": 10.545434929873682,
+      "min": 5.0,
+      "25%": 31.0,
+      "50%": 39.0,
+      "75%": 45.0,
+      "max": 61.0
+    }
+  },
+  "financial": {
+    "ID": {
+      "min": 24890.0,
+      "max": 173559.0,
+      "mean": 99224.5,
+      "p1": 26376.69,
+      "p5": 32323.45,
+      "p25": 62057.25,
+      "p50": 99224.5,
+      "p75": 136391.75,
+      "p95": 166125.55,
+      "p99": 172072.31,
+      "skew": 0.0,
+      "kurtosis": -1.1999999999999997,
+      "negative_count": 0,
+      "zero_count": 0
+    },
+    "year": {
+      "min": 2019.0,
+      "max": 2019.0,
+      "mean": 2019.0,
+      "p1": 2019.0,
+      "p5": 2019.0,
+      "p25": 2019.0,
+      "p50": 2019.0,
+      "p75": 2019.0,
+      "p95": 2019.0,
+      "p99": 2019.0,
+      "skew": 0.0,
+      "kurtosis": 0.0,
+      "negative_count": 0,
+      "zero_count": 0
+    },
+    "loan_amount": {
+      "min": 16500.0,
+      "max": 3576500.0,
+      "mean": 331117.7439967714,
+      "p1": 66500.0,
+      "p5": 106500.0,
+      "p25": 196500.0,
+      "p50": 296500.0,
+      "p75": 436500.0,
+      "p95": 656500.0,
+      "p99": 856500.0,
+      "skew": 1.6669980938622415,
+      "kurtosis": 9.127775255514376,
+      "negative_count": 0,
+      "zero_count": 0
+    },
+    "rate_of_interest": {
+      "min": 0.0,
+      "max": 8.0,
+      "mean": 4.045475804367777,
+      "p1": 2.875,
+      "p5": 3.125,
+      "p25": 3.625,
+      "p50": 3.99,
+      "p75": 4.375,
+      "p95": 4.99,
+      "p99": 5.5,
+      "skew": 0.3884060270841701,
+      "kurtosis": 0.34456403501357347,
+      "negative_count": 0,
+      "zero_count": 1
+    },
+    "Interest_rate_spread": {
+      "min": -3.638,
+      "max": 3.357,
+      "mean": 0.4416556604868295,
+      "p1": -0.6811,
+      "p5": -0.31745,
+      "p25": 0.076,
+      "p50": 0.3904,
+      "p75": 0.7754,
+      "p95": 1.3794,
+      "p99": 1.6196299999999972,
+      "skew": 0.28076233013056445,
+      "kurtosis": -0.18356607863153585,
+      "negative_count": 21883,
+      "zero_count": 9
+    },
+    "Upfront_charges": {
+      "min": 0.0,
+      "max": 60000.0,
+      "mean": 3224.996126591334,
+      "p1": 0.0,
+      "p5": 0.0,
+      "p25": 581.49,
+      "p50": 2596.45,
+      "p75": 4812.5,
+      "p95": 9272.688499999998,
+      "p99": 14297.049899999964,
+      "skew": 1.7540756791547982,
+      "kurtosis": 6.368586300587068,
+      "negative_count": 0,
+      "zero_count": 20770
+    },
+    "term": {
+      "min": 96.0,
+      "max": 360.0,
+      "mean": 335.1365816899797,
+      "p1": 180.0,
+      "p5": 180.0,
+      "p25": 360.0,
+      "p50": 360.0,
+      "p75": 360.0,
+      "p95": 360.0,
+      "p99": 360.0,
+      "skew": -2.1748217958156495,
+      "kurtosis": 3.1732363170669395,
+      "negative_count": 0,
+      "zero_count": 0
+    },
+    "property_value": {
+      "min": 8000.0,
+      "max": 16508000.0,
+      "mean": 497893.46569640347,
+      "p1": 88000.0,
+      "p5": 148000.0,
+      "p25": 268000.0,
+      "p50": 418000.0,
+      "p75": 628000.0,
+      "p95": 1058000.0,
+      "p99": 1808000.0,
+      "skew": 4.586275832462365,
+      "kurtosis": 73.22119583882989,
+      "negative_count": 0,
+      "zero_count": 0
+    },
+    "income": {
+      "min": 0.0,
+      "max": 578580.0,
+      "mean": 6957.338876146789,
+      "p1": 600.0,
+      "p5": 1920.0,
+      "p25": 3720.0,
+      "p50": 5760.0,
+      "p75": 8520.0,
+      "p95": 15420.0,
+      "p99": 26640.0,
+      "skew": 17.307695079866924,
+      "kurtosis": 885.2924596801089,
+      "negative_count": 0,
+      "zero_count": 1260
+    },
+    "Credit_Score": {
+      "min": 500.0,
+      "max": 900.0,
+      "mean": 699.7891033833322,
+      "p1": 504.0,
+      "p5": 519.0,
+      "p25": 599.0,
+      "p50": 699.0,
+      "p75": 800.0,
+      "p95": 881.0,
+      "p99": 897.0,
+      "skew": 0.004766756957725898,
+      "kurtosis": -1.202649443264979,
+      "negative_count": 0,
+      "zero_count": 0
+    },
+    "LTV": {
+      "min": 0.967478198,
+      "max": 7831.25,
+      "mean": 72.74645733387138,
+      "p1": 19.61009174,
+      "p5": 36.35057471,
+      "p25": 60.47486034,
+      "p50": 75.13586957,
+      "p75": 86.18421053,
+      "p95": 98.72881356,
+      "p99": 102.7597403,
+      "skew": 120.61533746802151,
+      "kurtosis": 19979.044666198046,
+      "negative_count": 0,
+      "zero_count": 0
+    },
+    "dtir1": {
+      "min": 5.0,
+      "max": 61.0,
+      "mean": 37.73293242017198,
+      "p1": 8.0,
+      "p5": 20.0,
+      "p25": 31.0,
+      "p50": 39.0,
+      "p75": 45.0,
+      "p95": 54.0,
+      "p99": 60.0,
+      "skew": -0.5514649624329434,
+      "kurtosis": 0.37888255574493,
+      "negative_count": 0,
+      "zero_count": 0
+    }
+  },
+  "high_correlations": [
+    [
+      "loan_amount",
+      "property_value",
+      0.734249016959531
+    ],
+    [
+      "rate_of_interest",
+      "Interest_rate_spread",
+      0.6149080812390451
+    ]
+  ],
+  "target_correlations": {
+    "ID": 0.0017031219693552924,
+    "loan_amount": -0.03682527554437397,
+    "rate_of_interest": 0.022957073323988504,
+    "Upfront_charges": -0.019137941919085476,
+    "term": -0.0002398242864933579,
+    "property_value": -0.04886412718512826,
+    "income": -0.06511896960828896,
+    "Credit_Score": 0.004003693595588123,
+    "LTV": 0.0388954661722379,
+    "Status": 1.0,
+    "dtir1": 0.07808306605282271
+  }
+}
